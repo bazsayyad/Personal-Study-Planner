@@ -1,26 +1,113 @@
 # UniNest — Personal Study Planner
 
-The planner runs as a local Python web app. Flask serves the browser interface and handles the planner API; SQLite keeps the data in `study_planner.db` on this computer.
+UniNest is a personal workspace for planning study tasks, collecting notes and useful resources, and protecting focused study time. It is designed for one student to manage their work in a calm, organized place.
 
-## Start the app
+## How the app flows
 
-On Windows, double-click `run_app.bat`. The first launch creates a project-local `.venv`, installs Flask from `requirements.txt`, and opens the planner at `http://127.0.0.1:8000`. Keep the terminal window open while you use it; close the window to stop the local server.
+```mermaid
+flowchart LR
+    A[Launch UniNest] --> B{Account}
+    B -->|New student| C[Create account]
+    B -->|Returning student| D[Sign in]
+    C --> E[Personal dashboard]
+    D --> E
+    E --> F[Plan and track tasks]
+    E --> G[Write notes]
+    E --> H[Save study resources]
+    E --> I[Focus room and timer]
+    F --> J[(Local SQLite database)]
+    G --> J
+    H --> J
+    I --> J
+    J --> K[Export or import JSON backup]
+```
 
-For a classroom presentation, double-click `run_demo.bat`. It opens a separate, compact demo database with a few sample tasks, notes, and resources. Your personal planner database is not changed.
+### Typical student workflow
 
-On the regular launcher, choose **Create account** the first time you open UniNest, then use that email and password on later visits. Passwords are stored as hashes. The first account adopts existing unassigned planner rows so your current tasks, notes, and resources stay available. In the demo launcher, choose **Explore the demo space** for one-click access.
+1. Start the app and create an account, or sign in.
+2. Review the dashboard for progress and upcoming tasks.
+3. Add study tasks, set their priority, and mark them complete as you work.
+4. Capture useful ideas in Notes and keep links in Resources.
+5. Open Focus room, choose a session length, and start the timer.
+6. Export a JSON backup, or import a previous backup to add its planner data.
+7. Update your profile or password from **My account**.
 
-You can also launch it from a terminal with `python main.py` after installing the requirements in your environment.
+## Main features
 
-## Included
+- Dashboard with task progress, quick task entry, and an overview of saved work
+- Task list with priority, completion, search, filters, and deletion
+- Notes and a study resource shelf
+- Focus timer with 15, 25, and 50 minute sessions
+- Account registration, sign-in, profile editing, and password changes
+- Warm dark and light themes, animated page transitions, and theme-aware artwork
+- Button sounds, custom glowing pointer, and reduced-motion support
+- JSON export and import; imported tasks, notes, and resources are added to the current planner
+- Local-first storage using SQLite, with planner records separated by account
 
-- Dashboard with task progress and quick-add
-- Tasks with priority, completion, search, filters, and delete
-- Notes and study resources
-- Focus timer with 15, 25, and 50 minute presets
-- Persistent warm dark and light themes
-- JSON data export
-- Subtle button sounds, custom cursor, and reduced-motion support
-- Local sign-in and registration, with separate planner data per account
+## Technology
 
-The old Tkinter implementation is kept in `legacy_desktop.py` for reference. Existing planner rows are preserved and assigned to the first account you register.
+- **Backend:** Python and Flask
+- **Database:** SQLite, included with Python
+- **Browser interface:** HTML, CSS, and JavaScript
+- **Dependency:** Flask (listed in `requirements.txt`)
+
+Flask renders the pages and provides the API. The browser interface calls that API to read and update planner data. SQLite stores accounts, tasks, notes, resources, and theme preference on this computer. Passwords are stored as hashes.
+
+## What you need
+
+- Windows 10 or 11
+- Python 3.10 or newer installed and available on PATH
+- Internet access on the first launch so the launcher can install Flask; after setup, the planner data and app run locally
+- A modern browser such as Chrome, Edge, or Firefox
+
+No separate database server or front-end build tools are required.
+
+## Run UniNest
+
+1. Double-click `run_app.bat`.
+2. On the first launch, the script creates `.venv` and installs Flask.
+3. UniNest opens at <http://127.0.0.1:8000>.
+4. Create an account to begin. Keep the terminal window open while using the app; close it to stop the server.
+
+To run from a terminal instead:
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python main.py
+```
+
+## Classroom demo
+
+Double-click `run_demo.bat` to open the presentation version. It uses `study_planner_demo.db`, separate from the regular `study_planner.db`, and supplies sample study data. Select **Explore the demo space** on the sign-in page for one-click access. Changes made in the demo stay in the demo database.
+
+## Data and backups
+
+- Regular accounts and planner records are stored in `study_planner.db` beside the app.
+- The demo launcher uses `study_planner_demo.db` instead.
+- Use **Export** to download a JSON backup of tasks, notes, resources, and theme.
+- Use **Import** to add those records from a UniNest JSON backup. Existing planner entries are kept; account credentials are not included in the backup.
+- Keep a copy of the database or JSON export somewhere safe if the planner data matters.
+
+## Project files
+
+| File | Purpose |
+| --- | --- |
+| `app.py` | Flask routes, account logic, validation, and SQLite operations |
+| `main.py` | Starts the local web server |
+| `templates/index.html` | Main planner workspace |
+| `templates/auth.html` | Sign-in and registration screen |
+| `static/app.js` | Planner interactions and API calls |
+| `static/app.css` | Planner layout, themes, animation, and visual design |
+| `static/auth.js`, `static/auth.css` | Authentication page behavior and styling |
+| `run_app.bat` | Regular local launcher |
+| `run_demo.bat` | Isolated classroom demo launcher |
+| `legacy_desktop.py` | Earlier Tkinter prototype, kept for reference |
+
+## Before presenting
+
+- Start with `run_demo.bat` and use the sample workspace to demonstrate the app.
+- Show the task workflow, notes, resources, focus timer, theme switch, account page, and JSON export/import.
+- Explain the local flow: Flask handles requests, SQLite stores the data, and the browser interface presents the planner.
+- Keep the regular planner database separate from the demo database.
