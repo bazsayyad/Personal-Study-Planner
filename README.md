@@ -15,6 +15,7 @@ flowchart LR
     E --> G[Write notes]
     E --> H[Save study resources]
     E --> I[Focus room and timer]
+    E --> N[Optional Study Coach]
     F --> J[(Local SQLite database)]
     G --> J
     H --> J
@@ -38,11 +39,15 @@ flowchart LR
 - Task list with priority, completion, search, filters, and deletion
 - Notes and a study resource shelf
 - Focus timer with 15, 25, and 50 minute sessions
+- Study Coach (in progress): optional Gemini-assisted planning around available time and stress check-ins
+- Optional due dates and study-time estimates to help prioritize tasks
 - Account registration, sign-in, profile editing, and password changes
 - Warm dark and light themes, animated page transitions, and theme-aware artwork
-- Button sounds, custom glowing pointer, and reduced-motion support
+- Button sounds, a theme-tinted arrow cursor, and reduced-motion support
 - JSON export and import; imported tasks, notes, and resources are added to the current planner
 - Local-first storage using SQLite, with planner records separated by account
+
+Study Coach is still being developed. When connected, it asks for consent before sharing unfinished-task details, available time, and the stress check-in with Gemini. It never sends notes, resources, account name, or email. Treat generated plans as drafts; choose **Save plan to Notes** if you want to keep one. Without optional AI configuration, the rest of UniNest works as usual.
 
 ## Technology
 
@@ -51,7 +56,7 @@ flowchart LR
 - **Browser interface:** HTML, CSS, and JavaScript
 - **Dependency:** Flask (listed in `requirements.txt`)
 
-Flask renders the pages and provides the API. The browser interface calls that API to read and update planner data. SQLite stores accounts, tasks, notes, resources, and theme preference on this computer. Passwords are stored as hashes.
+Flask renders the pages and handles browser requests to read and update planner data. SQLite stores accounts, tasks, notes, resources, and theme preference on this computer. Passwords are stored as hashes.
 
 ## What you need
 
@@ -61,6 +66,10 @@ Flask renders the pages and provides the API. The browser interface calls that A
 - A modern browser such as Chrome, Edge, or Firefox
 
 No separate database server or front-end build tools are required.
+
+### Study Coach setup
+
+Study Coach is optional and uses Gemini. Paste your Gemini key into the setup card in UniNest; it stays in server memory until UniNest stops and is not added to account data or JSON exports. The Gemini connection and plan generation are still being refined, so the feature may change. Never add credentials or secret configuration files to this README or commit them to the project. The planner works without Study Coach.
 
 ## Run UniNest
 
@@ -89,21 +98,6 @@ Double-click `run_demo.bat` to open the presentation version. It uses `study_pla
 - Use **Export** to download a JSON backup of tasks, notes, resources, and theme.
 - Use **Import** to add those records from a UniNest JSON backup. Existing planner entries are kept; account credentials are not included in the backup.
 - Keep a copy of the database or JSON export somewhere safe if the planner data matters.
-
-## Project files
-
-| File | Purpose |
-| --- | --- |
-| `app.py` | Flask routes, account logic, validation, and SQLite operations |
-| `main.py` | Starts the local web server |
-| `templates/index.html` | Main planner workspace |
-| `templates/auth.html` | Sign-in and registration screen |
-| `static/app.js` | Planner interactions and API calls |
-| `static/app.css` | Planner layout, themes, animation, and visual design |
-| `static/auth.js`, `static/auth.css` | Authentication page behavior and styling |
-| `run_app.bat` | Regular local launcher |
-| `run_demo.bat` | Isolated classroom demo launcher |
-| `legacy_desktop.py` | Earlier Tkinter prototype, kept for reference |
 
 ## Before presenting
 

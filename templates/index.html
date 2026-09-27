@@ -25,6 +25,7 @@
         <button class="nav-item" data-view="notes"><span class="nav-icon" data-icon="note"></span><span>Notes</span></button>
         <button class="nav-item" data-view="resources"><span class="nav-icon" data-icon="link"></span><span>Resources</span></button>
         <button class="nav-item" data-view="focus"><span class="nav-icon" data-icon="timer"></span><span>Focus room</span></button>
+        <button class="nav-item" data-view="coach"><span class="nav-icon" data-icon="spark"></span><span>Study Coach</span></button>
         <button class="nav-item" data-view="account"><span class="nav-icon" data-icon="user"></span><span>My account</span></button>
       </nav>
       <div class="sidebar-bottom">
@@ -47,6 +48,13 @@
           <button type="button" class="top-avatar" id="top-avatar" data-go="account" aria-label="Open account details" title="My account">U</button>
         </div>
       </header>
+
+      <div class="ambient-stage" aria-hidden="true">
+        <div class="ambient-orbit ambient-orbit-a"><span class="orbit-book"><svg viewBox="0 0 32 32"><path d="M16 9c-3-2-7-2-10-1v15c3-1 7-1 10 1m0-15c3-2 7-2 10-1v15c-3-1-7-1-10 1m0-15v15"/></svg></span></div>
+        <div class="ambient-orbit ambient-orbit-b"><span class="orbit-book"><svg viewBox="0 0 32 32"><path d="M16 9c-3-2-7-2-10-1v15c3-1 7-1 10 1m0-15c3-2 7-2 10-1v15c-3-1-7-1-10 1m0-15v15"/></svg></span></div>
+        <div class="ambient-orbit ambient-orbit-c"><span class="orbit-book"><svg viewBox="0 0 32 32"><path d="M16 9c-3-2-7-2-10-1v15c3-1 7-1 10 1m0-15c3-2 7-2 10-1v15c-3-1-7-1-10 1m0-15v15"/></svg></span></div>
+        <span class="ambient-star ambient-star-a">✳</span><span class="ambient-star ambient-star-b">✦</span>
+      </div>
 
       <div class="content-wrap">
         <section class="view active-view" id="view-dashboard" data-view-panel="dashboard">
@@ -81,7 +89,7 @@
 
         <section class="view" id="view-tasks" data-view-panel="tasks">
           <div class="page-title-row"><div><div class="eyebrow"><span class="eyebrow-line"></span> YOUR WORKSPACE / 01</div><h1>Tasks<span class="title-period">.</span></h1><p class="page-subtitle">Make the next step clear. Momentum will follow.</p></div><button class="soft-button" id="task-focus-button"><span data-icon="timer"></span>Focus room</button></div>
-          <div class="task-layout"><section class="surface task-compose"><div class="surface-heading"><div><span class="surface-kicker">GET IT OUT OF YOUR HEAD</span><h3>Add a task</h3></div><span class="compose-index">01 / 03</span></div><form id="task-form" class="form-stack"><label class="field-label" for="task-title">TASK NAME</label><input id="task-title" class="field-input" maxlength="240" placeholder="e.g. Review chapter four" required><div class="field-row"><label class="field-label" for="task-priority">PRIORITY</label><div class="select-wrap"><select id="task-priority"><option>Normal</option><option>High</option><option>Low</option></select><span data-icon="chevron"></span></div></div><button class="primary-button form-submit" type="submit"><span data-icon="plus"></span>Add to my list</button></form><div class="compose-tip"><span data-icon="spark"></span>Start small. Make it doable.</div></section>
+          <div class="task-layout"><section class="surface task-compose"><div class="surface-heading"><div><span class="surface-kicker">GET IT OUT OF YOUR HEAD</span><h3>Add a task</h3></div><span class="compose-index">01 / 03</span></div><form id="task-form" class="form-stack"><label class="field-label" for="task-title">TASK NAME</label><input id="task-title" class="field-input" maxlength="240" placeholder="e.g. Review chapter four" required><div class="field-row"><label class="field-label" for="task-priority">PRIORITY</label><div class="select-wrap"><select id="task-priority"><option>Normal</option><option>High</option><option>Low</option></select><span data-icon="chevron"></span></div></div><div class="task-planning-fields"><div><label class="field-label" for="task-due-date">DUE DATE <span>OPTIONAL</span></label><input id="task-due-date" class="field-input" type="date"></div><div><label class="field-label" for="task-estimate">STUDY TIME <span>OPTIONAL</span></label><div class="select-wrap"><select id="task-estimate"><option value="">No estimate</option><option value="15">15 min</option><option value="25">25 min</option><option value="45">45 min</option><option value="60">1 hour</option><option value="90">1.5 hours</option><option value="120">2 hours</option><option value="180">3 hours</option></select><span data-icon="chevron"></span></div></div></div><button class="primary-button form-submit" type="submit"><span data-icon="plus"></span>Add to my list</button></form><div class="compose-tip"><span data-icon="spark"></span>Start small. Make it doable.</div></section>
             <section class="surface task-list-surface"><div class="surface-heading"><div><span class="surface-kicker">YOUR STUDY PLAN</span><h3>Everything on your list <span class="inline-count" id="task-list-count">0</span></h3></div><label class="search-field"><span data-icon="search"></span><input id="task-search" placeholder="Find a task…" aria-label="Find a task"></label></div><div class="filter-row"><button class="filter-button active-filter" data-task-filter="all">All tasks</button><button class="filter-button" data-task-filter="pending">To do</button><button class="filter-button" data-task-filter="done">Completed</button><span class="filter-spacer"></span><span class="sort-label">SORTED BY PRIORITY</span></div><div id="task-list" class="task-list"></div></section></div>
         </section>
 
@@ -100,6 +108,26 @@
           <div class="page-title-row focus-title-row"><div><div class="eyebrow"><span class="eyebrow-line"></span> YOUR WORKSPACE / 04</div><h1>Focus room<span class="title-period">.</span></h1><p class="page-subtitle">No rush. No noise. Just this moment and the work in front of you.</p></div><span class="focus-status"><span class="status-dot"></span> YOUR TIME, YOURS</span></div>
           <article class="focus-surface"><div class="focus-orbit focus-orbit-one"></div><div class="focus-orbit focus-orbit-two"></div><div class="focus-inner"><span class="focus-kicker"><span class="live-dot"></span> A LITTLE SPACE TO THINK</span><div class="timer-dial" id="timer-dial"><svg viewBox="0 0 280 280" aria-hidden="true"><circle class="timer-track" cx="140" cy="140" r="126"></circle><circle class="timer-progress-ring" id="timer-ring" cx="140" cy="140" r="126"></circle></svg><div class="timer-center"><span class="timer-label">FOCUS SESSION</span><strong id="timer-display">25<span>:</span>00</strong><span class="timer-subtitle" id="timer-status">Settle in. You’re right where you need to be.</span></div></div><div class="timer-controls"><button class="primary-button timer-main-button" id="timer-start"><span data-icon="play"></span><span>Begin focus</span></button><button class="soft-button timer-control-button" id="timer-reset"><span data-icon="refresh"></span>Reset</button></div><div class="timer-preset-row"><span>SESSION LENGTH</span><div class="preset-buttons"><button class="preset-button is-selected" data-minutes="25">25 min <span>·</span> focus</button><button class="preset-button" data-minutes="50">50 min <span>·</span> deep work</button><button class="preset-button" data-minutes="15">15 min <span>·</span> short sprint</button></div></div><div class="focus-signoff"><span>YOU’VE GOT THIS.</span><span class="signoff-star">✳</span><span>ONE THING AT A TIME.</span></div></div></article>
         </section>
+        <section class="view coach-view" id="view-coach" data-view-panel="coach">
+          <div class="page-title-row"><div><div class="eyebrow"><span class="eyebrow-line"></span> A GENTLER WAY TO MAKE PROGRESS</div><h1>Study Coach<span class="title-period">.</span></h1><p class="page-subtitle">Turn a crowded to-do list into one clear, manageable next step.</p></div><span class="coach-live-status" id="coach-live-status"><span class="status-dot"></span><span>OPTIONAL AI SUPPORT</span></span></div>
+          <article class="coach-intro surface"><span class="coach-intro-orbit" aria-hidden="true"></span><div><span class="surface-kicker">PLAN WITH YOUR ENERGY, NOT AGAINST IT</span><h2>A plan that gives you room to breathe.</h2><p>Study Coach considers your unfinished tasks, your available time, and how today feels. It suggests a gentle sequence with breaks. You stay in control.</p></div><span class="coach-intro-symbol" aria-hidden="true">✳</span></article>
+          <div class="coach-layout">
+            <section class="surface coach-input-surface"><div class="surface-heading"><div><span class="surface-kicker">START WITH TODAY</span><h3>How should we shape your plan?</h3></div><span class="account-section-index">01</span></div>
+              <form id="coach-form" class="form-stack coach-form">
+                <label class="field-label" for="coach-stress">HOW HEAVY DOES TODAY FEEL?</label>
+                <div class="select-wrap"><select id="coach-stress"><option value="1">1 · Calm and clear</option><option value="2">2 · Pretty steady</option><option value="3" selected>3 · A little stretched</option><option value="4">4 · Feeling overloaded</option><option value="5">5 · Need a gentler plan</option></select><span data-icon="chevron"></span></div>
+                <label class="field-label" for="coach-time">TIME AVAILABLE TO STUDY</label>
+                <div class="coach-time-row"><input id="coach-time" class="field-input" type="number" min="15" max="480" step="15" value="120" required><span>minutes today</span></div>
+                <label class="coach-consent"><input id="coach-consent" type="checkbox" required><span>For this plan, send my unfinished task titles, priorities, due dates, study estimates, available time, and check-in to the AI service.</span></label>
+                <p class="coach-privacy-note"><span data-icon="lock"></span>Your notes, resources, name, and email are never sent. The AI suggestion is not saved unless you choose to save it.</p>
+                <button class="primary-button form-submit coach-submit" id="coach-submit" type="submit"><span data-icon="spark"></span>Build my study plan</button>
+              </form>
+              <div class="coach-setup-note" id="coach-config-note" hidden><span class="coach-setup-mark">✳</span><div class="coach-key-content"><p>Connect a Gemini key to turn on Study Coach. It stays in server memory and is cleared when UniNest stops. <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer">Get a key ↗</a></p><form id="coach-key-form" class="coach-key-form"><label class="field-label" for="coach-api-key">GEMINI API KEY</label><div class="coach-key-row"><input id="coach-api-key" class="field-input" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your Gemini key" required><button type="submit" class="soft-button" id="coach-key-submit">Connect Gemini</button></div></form><small>Your key is not saved to your account, database, or JSON exports.</small></div></div>
+            </section>
+            <aside class="surface coach-boundary"><span class="surface-kicker">A NOTE ON CARE</span><span class="coach-boundary-mark">☼</span><h3>Progress can be gentle.</h3><p>This is study-planning support, not medical advice or therapy. If you’re overwhelmed, it’s okay to pause and reach out to someone you trust.</p><span class="coach-boundary-foot">ONE STEP IS STILL A STEP.</span></aside>
+          </div>
+          <section class="surface coach-result" id="coach-result" hidden aria-live="polite"></section>
+        </section>
         <section class="view" id="view-account" data-view-panel="account">
           <div class="page-title-row"><div><div class="eyebrow"><span class="eyebrow-line"></span> YOUR PERSONAL SPACE</div><h1>My account<span class="title-period">.</span></h1><p class="page-subtitle">Keep your profile current and your sign-in details up to date.</p></div><span class="view-count">PRIVATE PROFILE</span></div>
           <div class="account-layout">
@@ -112,6 +140,5 @@
       </div>
     </main>
   </div>
-  <div class="custom-cursor" id="custom-cursor" aria-hidden="true"><span></span></div>
 </body>
 </html>

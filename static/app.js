@@ -53,6 +53,7 @@ async function api(path, options = {}) {
 }
 
 let toastTimer;
+let latestCoachPlan = null;
 function toast(message) {
   const node = $('#toast');
   node.textContent = message;
@@ -70,6 +71,12 @@ function formatDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.valueOf())) return esc(value);
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(date).toUpperCase();
+}
+
+function formatDueDate(value) {
+  if (!value) return '';
+  const [year, month, day] = value.split('-').map(Number);
+  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(year, month - 1, day));
 }
 
 function render() {
@@ -109,9 +116,11 @@ function orderedTasks() {
 function taskRow(task, dashboard = false) {
   const checked = Boolean(task.done);
   const priority = String(task.priority || 'Normal').toLowerCase();
+  const taskTitle = `<span class="${dashboard ? 'dashboard-task-title' : 'task-row-title'} ${checked ? 'is-done' : ''}">${esc(task.title)}</span>`;
+  const taskMeta = [task.due_date ? `Due ${formatDueDate(task.due_date)}` : '', task.estimate_minutes ? `${task.estimate_minutes} min` : ''].filter(Boolean).join(' · ');
   return `<div class="${dashboard ? 'dashboard-task-row' : 'task-row'}" style="animation-delay:${Math.min((task.id % 8) * 25, 175)}ms">
     <button class="task-check ${checked ? 'checked' : ''}" data-toggle-task="${task.id}" aria-label="Mark ${esc(task.title)} ${checked ? 'incomplete' : 'complete'}" aria-pressed="${checked}">${checked ? `<svg viewBox="0 0 24 24" aria-hidden="true">${icons.check}</svg>` : ''}</button>
-    <span class="${dashboard ? 'dashboard-task-title' : 'task-row-title'} ${checked ? 'is-done' : ''}">${esc(task.title)}</span>
+    ${dashboard ? taskTitle : `<span class="task-row-copy">${taskTitle}${taskMeta ? `<small>${esc(taskMeta)}</small>` : ''}</span>`}
     ${dashboard ? `<span class="priority-pill ${priority}">${esc(task.priority)}</span>` : `<span class="priority-pill ${priority}">${esc(task.priority)}</span><button class="delete-button" data-delete-task="${task.id}" aria-label="Delete task: ${esc(task.title)}"><svg viewBox="0 0 24 24" aria-hidden="true">${icons.trash}</svg></button>`}
   </div>`;
 }
@@ -154,7 +163,7 @@ function renderResources() {
   }).join('') : emptyState('Your reference shelf is ready. Save a useful link to get started.', 'link');
 }
 
-const pageNames = { dashboard: 'Overview', tasks: 'Tasks', notes: 'Notes', resources: 'Resources', focus: 'Focus room', account: 'My account' };
+const pageNames = { dashboard: 'Overview', tasks: 'Tasks', notes: 'Notes', resources: 'Resources', focus: 'Focus room', coach: 'Study Coach', account: 'My account' };
 let navigationTimer = null;
 let navigationToken = 0;
 function navigate(view) {
@@ -199,8 +208,8 @@ function navigate(view) {
     }
     target.classList.add('active-view');
     navigationTimer = null;
-    window.setTimeout(() => target.style.removeProperty('--page-offset'), 470);
-  }, current ? 190 : 0);
+    window.setTimeout(() => target.style.removeProperty('--page-offset'), 600);
+  }, current ? 240 : 0);
 }
 
 let audioContext;
@@ -296,8 +305,8 @@ document.addEventListener('click', (event) => {
   if (preset) choosePreset(Number(preset.dataset.minutes), preset);
 });
 
-async function submitTask(title, priority = 'Normal') {
-  const task = await api('/api/tasks', { method: 'POST', body: JSON.stringify({ title, priority }) });
+async function submitTask(title, priority = 'Normal', planning = {}) {
+  const task = await api('/api/tasks', { method: 'POST', body: JSON.stringify({ title, priority, ...planning }) });
   state.tasks.unshift(task);
   renderSummary();
   renderDashboardTasks();
@@ -310,7 +319,11 @@ $('#task-form').addEventListener('submit', async (event) => {
   const title = $('#task-title').value.trim();
   if (!title) return;
   try {
-    await submitTask(title, $('#task-priority').value);
+    const estimate = $('#task-estimate').value;
+    await submitTask(title, $('#task-priority').value, {
+      due_date: $('#task-due-date').value || null,
+      estimate_minutes: estimate ? Number(estimate) : null,
+    });
     event.currentTarget.reset();
     $('#task-title').focus();
   } catch (error) { toast(error.message); }
@@ -400,6 +413,102 @@ $('#password-form').addEventListener('submit', async (event) => {
     toast('Your password has been updated.');
   } catch (error) { toast(error.message); }
   finally { submit.disabled = false; }
+});
+
+async function updateCoachStatus() {
+  try {
+    const status = await api('/api/coach/status');
+    $('#coach-config-note').hidden = status.available;
+    $('#coach-live-status').classList.toggle('coach-ready', status.available);
+    $('#coach-live-status span:last-child').textContent = status.available ? 'GEMINI KEY SET · READY TO TRY' : 'GEMINI SETUP NEEDED';
+  } catch { /* Study Coach setup status must not interrupt the rest of the planner. */ }
+}
+
+$('#coach-key-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const input = $('#coach-api-key');
+  const button = $('#coach-key-submit');
+  const apiKey = input.value.trim();
+  if (!apiKey) return;
+  button.disabled = true;
+  button.textContent = 'Connecting…';
+  try {
+    await api('/api/coach/key', { method: 'PUT', body: JSON.stringify({ api_key: apiKey }) });
+    input.value = '';
+    await updateCoachStatus();
+    toast('Key saved for this UniNest session.');
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Connect Gemini';
+  }
+});
+
+function renderCoachPlan(plan) {
+  latestCoachPlan = plan;
+  const steps = plan.steps.map((step, index) => `${index ? `<div class="coach-break"><span>✳</span> ${plan.break_minutes}-minute reset</div>` : ''}
+    <article class="coach-step"><span class="coach-step-index">${String(index + 1).padStart(2, '0')}</span><div class="coach-step-copy"><span class="coach-task-name">${esc(step.task_title)}</span><h4>${esc(step.action)}</h4><p>${esc(step.reason)}</p></div><span class="coach-step-time">${step.minutes} <small>MIN</small></span></article>`).join('');
+  const result = $('#coach-result');
+  result.innerHTML = `<div class="coach-result-heading"><div><span class="surface-kicker">YOUR PLAN, AT YOUR PACE</span><h2>${esc(plan.headline)}</h2><p>${esc(plan.support)}</p></div><span class="coach-plan-total">${plan.available_minutes}<small>MIN AVAILABLE</small></span></div><div class="coach-timeline">${steps}</div><div class="coach-result-footer"><p>${esc(plan.closing)}</p><button type="button" class="soft-button" id="save-coach-plan"><span data-icon="note"></span>Save plan to Notes</button></div>`;
+  const icon = $('#save-coach-plan [data-icon="note"]');
+  if (icon) icon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${icons.note}</svg>`;
+  result.hidden = false;
+  result.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+$('#coach-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const submit = $('#coach-submit');
+  submit.disabled = true;
+  submit.textContent = 'Finding a steadier rhythm…';
+  try {
+    const plan = await api('/api/coach/plan', { method: 'POST', body: JSON.stringify({
+      stress_level: Number($('#coach-stress').value),
+      available_minutes: Number($('#coach-time').value),
+      share_with_ai: $('#coach-consent').checked,
+    }) });
+    renderCoachPlan(plan);
+  } catch (error) {
+    toast(error.message);
+    if (error.status === 503 && error.message.includes('Connect a Gemini key below')) $('#coach-config-note').hidden = false;
+    if (error.status === 502 && error.message.toLowerCase().includes('gemini rejected the api key')) {
+      $('#coach-config-note').hidden = false;
+      $('#coach-live-status span:last-child').textContent = 'CHECK YOUR KEY';
+    }
+  } finally {
+    submit.disabled = false;
+    submit.innerHTML = `<span data-icon="spark"><svg viewBox="0 0 24 24" aria-hidden="true">${icons.spark}</svg></span>Build my study plan`;
+  }
+});
+
+document.addEventListener('click', async (event) => {
+  const saveButton = event.target.closest('#save-coach-plan');
+  if (!saveButton || !latestCoachPlan || saveButton.disabled) return;
+  saveButton.disabled = true;
+  const body = [
+    `Available study time: ${latestCoachPlan.available_minutes} minutes`,
+    `A gentle reminder: ${latestCoachPlan.support}`,
+    '',
+    ...latestCoachPlan.steps.flatMap((step, index) => [
+      `${index + 1}. ${step.task_title}: ${step.action} (${step.minutes} min)`,
+      step.reason ? `   ${step.reason}` : '',
+      index < latestCoachPlan.steps.length - 1 ? `   Take a ${latestCoachPlan.break_minutes}-minute reset.` : '',
+    ].filter(Boolean)),
+    '',
+    latestCoachPlan.closing,
+  ].join('\n');
+  try {
+    const note = await api('/api/notes', { method: 'POST', body: JSON.stringify({
+      title: `Study plan · ${new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date())}`,
+      body,
+    }) });
+    state.notes.unshift(note);
+    renderSummary();
+    renderNotes();
+    toast('Your study plan was saved to Notes.');
+  } catch (error) { toast(error.message); }
+  finally { if (saveButton.isConnected) saveButton.disabled = false; }
 });
 
 $('#task-search').addEventListener('input', (event) => { state.query = event.target.value; renderTasks(); });
@@ -558,25 +667,6 @@ $('#timer-reset').addEventListener('click', () => {
   $('#timer-status').textContent = 'Reset. Start again whenever you’re ready.';
 });
 
-const cursor = $('#custom-cursor');
-const finePointer = window.matchMedia('(hover: hover) and (pointer: fine)');
-if (finePointer.matches) {
-  window.addEventListener('pointermove', (event) => {
-    if (event.pointerType !== 'mouse' && event.pointerType !== 'pen') return;
-    document.body.classList.add('has-custom-cursor');
-    cursor.style.transform = `translate3d(${event.clientX}px,${event.clientY}px,0) translate(-50%,-50%)`;
-    cursor.style.opacity = '1';
-    cursor.classList.toggle('cursor-hover', Boolean(event.target.closest('button,a,input,textarea,select,[role="button"]')));
-  }, { passive: true });
-  window.addEventListener('pointerdown', () => cursor.classList.add('cursor-press'), { passive: true });
-  window.addEventListener('pointerup', () => cursor.classList.remove('cursor-press'), { passive: true });
-  window.addEventListener('pointercancel', () => cursor.classList.remove('cursor-press'), { passive: true });
-  window.addEventListener('pointerleave', () => {
-    cursor.style.opacity = '0';
-    document.body.classList.remove('has-custom-cursor');
-  });
-}
-
 function updateDate() {
   const now = new Date();
   $('#top-date').textContent = new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric' }).format(now).toUpperCase();
@@ -598,6 +688,7 @@ async function init() {
     showAccount(data.user);
     applyTheme(state.theme);
     render();
+    updateCoachStatus();
   } catch (error) {
     if (error.status === 401) {
       window.location.replace('/');

@@ -6,8 +6,10 @@ import os
 import re
 import secrets
 import sqlite3
+import urllib.error
+import urllib.request
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import date, datetime
 from functools import wraps
 from pathlib import Path
 from urllib.parse import urlparse
@@ -42,6 +44,7 @@ app.secret_key = session_secret()
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
                   SESSION_COOKIE_SECURE=False, PERMANENT_SESSION_LIFETIME=60 * 60 * 24 * 14,
                   MAX_CONTENT_LENGTH=8 * 1024 * 1024)
+STUDY_COACH_KEYS = {}
 
 
 @contextmanager
@@ -84,6 +87,11 @@ def initialize_database():
             if "user_id" not in columns:
                 db.execute(f"ALTER TABLE {table} ADD COLUMN user_id INTEGER REFERENCES users(id)")
             db.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_user_id ON {table}(user_id)")
+        task_columns = {row[1] for row in db.execute("PRAGMA table_info(tasks)")}
+        if "due_date" not in task_columns:
+            db.execute("ALTER TABLE tasks ADD COLUMN due_date TEXT")
+        if "estimate_minutes" not in task_columns:
+            db.execute("ALTER TABLE tasks ADD COLUMN estimate_minutes INTEGER")
 
         if DEMO_MODE:
             demo = db.execute("SELECT id FROM users WHERE email='demo@uninest.local'").fetchone()
@@ -301,7 +309,7 @@ def logout():
 @authenticated
 def bootstrap():
     with database() as db:
-        tasks = [dict(row) for row in db.execute("SELECT id,title,priority,done,created FROM tasks WHERE user_id=? ORDER BY done,id DESC", (g.user_id,))]
+        tasks = [dict(row) for row in db.execute("SELECT id,title,priority,done,created,due_date,estimate_minutes FROM tasks WHERE user_id=? ORDER BY done,id DESC", (g.user_id,))]
         notes = [dict(row) for row in db.execute("SELECT id,title,body,created FROM notes WHERE user_id=? ORDER BY id DESC", (g.user_id,))]
         resources = [dict(row) for row in db.execute("SELECT id,title,url,kind,created FROM resources WHERE user_id=? ORDER BY id DESC", (g.user_id,))]
         theme_row = db.execute("SELECT value FROM settings WHERE key=?", (f"theme:{g.user_id}",)).fetchone()
@@ -320,10 +328,19 @@ def create_task():
     priority = data.get("priority", "Normal")
     if priority not in ("Normal", "High", "Low"):
         abort(422, description="Choose a valid task priority.")
+    due_date = data.get("due_date") or None
+    if due_date is not None:
+        try:
+            date.fromisoformat(due_date)
+        except (TypeError, ValueError):
+            abort(422, description="Choose a valid task due date.")
+    estimate = data.get("estimate_minutes") or None
+    if estimate is not None and (not isinstance(estimate, int) or isinstance(estimate, bool) or not 5 <= estimate <= 480):
+        abort(422, description="Study estimates must be from 5 to 480 minutes.")
     with database() as db:
-        cursor = db.execute("INSERT INTO tasks(title,priority,created,user_id) VALUES(?,?,?,?)",
-                            (title, priority, datetime.now().isoformat(timespec="minutes"), g.user_id))
-        row = db.execute("SELECT id,title,priority,done,created FROM tasks WHERE id=? AND user_id=?", (cursor.lastrowid, g.user_id)).fetchone()
+        cursor = db.execute("INSERT INTO tasks(title,priority,created,user_id,due_date,estimate_minutes) VALUES(?,?,?,?,?,?)",
+                            (title, priority, datetime.now().isoformat(timespec="minutes"), g.user_id, due_date, estimate))
+        row = db.execute("SELECT id,title,priority,done,created,due_date,estimate_minutes FROM tasks WHERE id=? AND user_id=?", (cursor.lastrowid, g.user_id)).fetchone()
     return jsonify(dict(row)), 201
 
 
@@ -332,7 +349,7 @@ def create_task():
 def toggle_task(task_id):
     with database() as db:
         cursor = db.execute("UPDATE tasks SET done=1-done WHERE id=? AND user_id=?", (task_id, g.user_id))
-        row = db.execute("SELECT id,title,priority,done,created FROM tasks WHERE id=? AND user_id=?", (task_id, g.user_id)).fetchone()
+        row = db.execute("SELECT id,title,priority,done,created,due_date,estimate_minutes FROM tasks WHERE id=? AND user_id=?", (task_id, g.user_id)).fetchone()
     if not cursor.rowcount or row is None:
         abort(404, description="Task not found.")
     return jsonify(dict(row))
@@ -411,6 +428,152 @@ def set_theme():
     return jsonify(theme=theme)
 
 
+@app.post("/api/coach/plan")
+@authenticated
+def coach_plan():
+    api_key = STUDY_COACH_KEYS.get(g.user_id) or os.environ.get("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        abort(503, description="Connect a Gemini key below to use Study Coach.")
+    data = json_body()
+    if data.get("share_with_ai") is not True:
+        abort(422, description="Confirm that you want to send the selected planner details to the AI service.")
+    stress_level = data.get("stress_level")
+    available_minutes = data.get("available_minutes")
+    if not isinstance(stress_level, int) or isinstance(stress_level, bool) or not 1 <= stress_level <= 5:
+        abort(422, description="Choose a stress check-in from 1 to 5.")
+    if not isinstance(available_minutes, int) or isinstance(available_minutes, bool) or not 15 <= available_minutes <= 480:
+        abort(422, description="Choose between 15 and 480 available minutes.")
+
+    with database() as db:
+        rows = db.execute("""
+            SELECT id,title,priority,due_date,estimate_minutes FROM tasks
+            WHERE user_id=? AND done=0
+            ORDER BY CASE priority WHEN 'High' THEN 0 WHEN 'Normal' THEN 1 ELSE 2 END,
+                     due_date IS NULL,due_date,id
+            LIMIT 40
+        """, (g.user_id,)).fetchall()
+    if not rows:
+        abort(422, description="Add at least one unfinished task before asking Study Coach for a plan.")
+    tasks = [dict(row) for row in rows]
+    allowed_ids = {row["id"] for row in tasks}
+
+    schema = {
+        "type": "OBJECT",
+        "properties": {
+            "headline": {"type": "STRING"},
+            "support": {"type": "STRING"},
+            "steps": {"type": "ARRAY", "items": {"type": "OBJECT", "properties": {
+                "task_id": {"type": "INTEGER"}, "action": {"type": "STRING"},
+                "minutes": {"type": "INTEGER"}, "reason": {"type": "STRING"}},
+                "required": ["task_id", "action", "minutes", "reason"], "additionalProperties": False}},
+            "break_minutes": {"type": "INTEGER"},
+            "closing": {"type": "STRING"},
+        },
+        "required": ["headline", "support", "steps", "break_minutes", "closing"],
+        "additionalProperties": False,
+    }
+    model = os.environ.get("UNINEST_GEMINI_MODEL", "gemini-3.8-flash")
+    instructions = (
+            "You are UniNest Study Coach, a kind and practical study-planning assistant. "
+            "Create a realistic, low-pressure plan using only the provided task IDs. Respect due dates, priority, "
+            "estimates, available minutes, and the student's 1-to-5 stress check-in. On high stress, reduce scope, "
+            "include breathing room, and offer one small starting action. Never diagnose, give therapy, shame the student, "
+            "or imply that every task must be completed today. Split vague work into concrete next actions. "
+            "Keep each step between 5 and 90 minutes. Return no more than 8 steps. Keep breaks between 5 and 15 minutes. "
+            "Fit focus minutes plus breaks between steps within the available time. Respond with supportive concise text."
+    )
+    request_body = {
+        "systemInstruction": {"parts": [{"text": instructions}]},
+        "contents": [{"role": "user", "parts": [{"text": json.dumps(
+            {"available_minutes": available_minutes, "stress_level": stress_level, "tasks": tasks},
+            ensure_ascii=False)}]}],
+        "generationConfig": {"responseMimeType": "application/json", "responseSchema": schema,
+                             "maxOutputTokens": 1500},
+    }
+    request = urllib.request.Request(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+        data=json.dumps(request_body).encode("utf-8"),
+        headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=45) as response:
+            response_data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        if error.code in (400, 401, 403):
+            abort(502, description="Gemini rejected the API key or its access. Check the key and connect it again in Study Coach.")
+        if error.code == 429:
+            abort(503, description="Gemini is temporarily unavailable or has reached its usage limit. Try again later.")
+        abort(502, description="Study Coach could not prepare a plan. Check the Gemini model and try again.")
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+        abort(502, description="Study Coach could not reach Gemini. Check the connection and try again.")
+
+    output_text = next((part.get("text", "")
+                        for candidate in response_data.get("candidates", [])
+                        for part in candidate.get("content", {}).get("parts", [])
+                        if isinstance(part, dict) and isinstance(part.get("text"), str)), "")
+    try:
+        plan = json.loads(output_text)
+    except (TypeError, json.JSONDecodeError):
+        abort(502, description="Study Coach could not prepare a clear plan. Please try again.")
+    if not isinstance(plan, dict) or not isinstance(plan.get("steps"), list):
+        abort(502, description="Study Coach returned an incomplete plan. Please try again.")
+
+    task_by_id = {task["id"]: task for task in tasks}
+    break_minutes = plan.get("break_minutes", 8)
+    if not isinstance(break_minutes, int) or isinstance(break_minutes, bool):
+        break_minutes = 8
+    break_minutes = min(15, max(5, break_minutes))
+    cleaned_steps = []
+    remaining = available_minutes
+    for item in plan["steps"][:8]:
+        if not isinstance(item, dict):
+            continue
+        task_id = item.get("task_id")
+        action = item.get("action")
+        minutes = item.get("minutes")
+        reason = item.get("reason")
+        if (not isinstance(task_id, int) or isinstance(task_id, bool) or task_id not in allowed_ids
+                or not isinstance(action, str) or not action.strip()
+                or not isinstance(minutes, int) or isinstance(minutes, bool)):
+            continue
+        break_before = break_minutes if cleaned_steps else 0
+        duration = min(90, max(5, minutes), remaining - break_before)
+        if duration < 5:
+            break
+        remaining -= duration + break_before
+        cleaned_steps.append({"task_id": task_id, "task_title": task_by_id[task_id]["title"],
+                              "action": action.strip()[:240], "minutes": duration,
+                              "reason": reason.strip()[:240] if isinstance(reason, str) else ""})
+    if not cleaned_steps:
+        abort(502, description="Study Coach could not fit any task into that time. Try allowing more time.")
+    headline = plan.get("headline") if isinstance(plan.get("headline"), str) else "A steadier plan for today"
+    support = plan.get("support") if isinstance(plan.get("support"), str) else "One step at a time is enough."
+    closing = plan.get("closing") if isinstance(plan.get("closing"), str) else "Take a breath between steps."
+    return jsonify(headline=headline[:120], support=support[:500], steps=cleaned_steps,
+                   break_minutes=break_minutes, closing=closing[:240],
+                   available_minutes=available_minutes)
+
+
+@app.get("/api/coach/status")
+@authenticated
+def coach_status():
+    api_key = STUDY_COACH_KEYS.get(g.user_id) or os.environ.get("GEMINI_API_KEY", "").strip()
+    return jsonify(available=bool(api_key),
+                   model=os.environ.get("UNINEST_GEMINI_MODEL", "gemini-3.8-flash"))
+
+
+@app.put("/api/coach/key")
+@authenticated
+def save_coach_key():
+    data = json_body()
+    api_key = data.get("api_key")
+    if not isinstance(api_key, str) or len(api_key.strip()) > 500:
+        abort(422, description="Enter a valid AI service key.")
+    STUDY_COACH_KEYS[g.user_id] = api_key.strip()
+    return jsonify(available=bool(api_key.strip()))
+
+
 @app.get("/api/export")
 @authenticated
 def export_data():
@@ -420,7 +583,7 @@ def export_data():
             "app": "UniNest Personal Study Planner",
             "exported_at": datetime.now().isoformat(timespec="seconds"),
             "theme": theme_row[0] if theme_row and theme_row[0] in ("dark", "light") else "dark",
-            "tasks": [dict(row) for row in db.execute("SELECT id,title,priority,done,created FROM tasks WHERE user_id=? ORDER BY id", (g.user_id,))],
+            "tasks": [dict(row) for row in db.execute("SELECT id,title,priority,done,created,due_date,estimate_minutes FROM tasks WHERE user_id=? ORDER BY id", (g.user_id,))],
             "notes": [dict(row) for row in db.execute("SELECT id,title,body,created FROM notes WHERE user_id=? ORDER BY id", (g.user_id,))],
             "resources": [dict(row) for row in db.execute("SELECT id,title,url,kind,created FROM resources WHERE user_id=? ORDER BY id", (g.user_id,))],
         }
@@ -459,7 +622,16 @@ def import_data():
         created = row.get("created", now)
         if not isinstance(created, str) or len(created) > 64:
             abort(422, description="A task date is invalid.")
-        tasks.append((title, priority, int(bool(done)), created, g.user_id))
+        due_date = row.get("due_date") or None
+        if due_date is not None:
+            try:
+                date.fromisoformat(due_date)
+            except (TypeError, ValueError):
+                abort(422, description="A task due date is invalid.")
+        estimate = row.get("estimate_minutes") or None
+        if estimate is not None and (not isinstance(estimate, int) or isinstance(estimate, bool) or not 5 <= estimate <= 480):
+            abort(422, description="A study estimate must be from 5 to 480 minutes.")
+        tasks.append((title, priority, int(bool(done)), created, g.user_id, due_date, estimate))
     for row in imported["notes"]:
         if not isinstance(row, dict):
             abort(422, description="A note entry is invalid.")
@@ -489,7 +661,7 @@ def import_data():
     if theme is not None and theme not in ("dark", "light"):
         abort(422, description="The theme value must be dark or light.")
     with database() as db:
-        db.executemany("INSERT INTO tasks(title,priority,done,created,user_id) VALUES(?,?,?,?,?)", tasks)
+        db.executemany("INSERT INTO tasks(title,priority,done,created,user_id,due_date,estimate_minutes) VALUES(?,?,?,?,?,?,?)", tasks)
         db.executemany("INSERT INTO notes(title,body,created,user_id) VALUES(?,?,?,?)", notes)
         db.executemany("INSERT INTO resources(title,url,kind,created,user_id) VALUES(?,?,?,?,?)", resources)
         if theme:
