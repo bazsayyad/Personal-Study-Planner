@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#151311">
+  <title>Sign in · UniNest Personal Study Planner</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,500;1,600&family=DM+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/auth.css">
+  <script src="/static/auth.js" defer></script>
+</head>
+<body class="auth-page" data-demo="{{ 'true' if demo_mode else 'false' }}">
+  <header class="auth-topbar">
+    <a class="auth-brand" href="/">UniNest<span>.</span></a>
+    <div class="auth-top-right"><span>YOUR PERSONAL STUDY SPACE</span><button id="auth-theme-toggle" class="icon-button" aria-label="Switch theme" title="Switch theme"><span id="auth-theme-icon">☼</span></button></div>
+  </header>
+  <main class="auth-layout">
+    <section class="auth-story">
+      <div class="story-grid"></div><div class="story-orbit story-orbit-a"></div><div class="story-orbit story-orbit-b"></div>
+      <div class="story-copy"><div class="eyebrow"><span class="eyebrow-line"></span> A QUIETER WAY TO GET THINGS DONE</div><h1>Make space<br>for what <em>matters.</em></h1><p>A considered place for your plans, your notes, and the time you give to learning.</p>
+        <div class="story-line"><span class="story-line-num">01</span><span class="story-line-rule"></span><span>PLAN WITH INTENTION</span></div>
+      </div>
+      <div class="story-orb"><span></span><i></i><b></b></div>
+      <div class="story-footer"><span>FOCUS IS A PRACTICE.</span><span>TAKE IT ONE MOMENT AT A TIME.</span></div>
+    </section>
+    <section class="auth-panel-wrap">
+      <div class="auth-panel">
+        <div class="auth-panel-kicker"><span class="status-dot"></span> YOUR SPACE IS READY</div>
+        <h2 id="auth-title">Welcome <em>back.</em></h2>
+        <p class="auth-subtitle" id="auth-subtitle">Sign in to return to your study space.</p>
+        <div class="auth-mode" role="tablist" aria-label="Choose sign in or register"><button type="button" class="auth-mode-button selected" data-auth-mode="login" role="tab" aria-selected="true">Sign in</button><button type="button" class="auth-mode-button" data-auth-mode="register" role="tab" aria-selected="false">Create account</button></div>
+        <form id="auth-form" class="auth-form" novalidate>
+          <div class="auth-field" id="name-field" hidden><label for="auth-name">YOUR NAME</label><input id="auth-name" name="name" type="text" autocomplete="name" maxlength="80" placeholder="How should we address you?"></div>
+          <div class="auth-field"><label for="auth-email">EMAIL ADDRESS</label><input id="auth-email" name="email" type="email" autocomplete="email" maxlength="254" placeholder="you@example.com" required></div>
+          <div class="auth-field"><div class="auth-label-row"><label for="auth-password">PASSWORD</label><span id="password-hint">YOUR ACCOUNT STAYS ON THIS DEVICE</span></div><input id="auth-password" name="password" type="password" autocomplete="current-password" minlength="8" maxlength="128" placeholder="Enter your password" required></div>
+          <div class="auth-field" id="confirm-field" hidden><label for="auth-confirm">CONFIRM PASSWORD</label><input id="auth-confirm" name="confirm" type="password" autocomplete="new-password" minlength="8" maxlength="128" placeholder="Enter it once more"></div>
+          <div class="auth-error" id="auth-error" role="alert" aria-live="polite"></div>
+          <button class="primary-button auth-submit" id="auth-submit" type="submit"><span id="submit-label">Enter your space</span><span class="auth-submit-arrow">→</span></button>
+        </form>
+        {% if demo_mode %}
+        <div class="demo-divider"><span>OR</span></div>
+        <button type="button" class="demo-entry" id="demo-entry"><span class="demo-entry-icon">✳</span><span><strong>Explore the demo space</strong><small>OPEN THE SAMPLE PLANNER</small></span><span class="demo-entry-arrow">↗</span></button>
+        {% endif %}
+        <div class="auth-assurance"><span class="assurance-lock">⌑</span><span>PRIVATE BY DESIGN <i>·</i> YOUR STUDY DATA STAYS LOCAL</span></div>
+      </div>
+      <footer class="auth-mobile-footer">© UNINEST <span>·</span> STUDY, WITH INTENTION</footer>
+    </section>
+  </main>
+  <div class="auth-toast" id="auth-toast" role="status" aria-live="polite"></div>
+</body>
+</html>

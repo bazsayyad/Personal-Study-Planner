@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+.uninest-session-key
+study_planner.db
+study_planner_demo.db
+uninest_study_planner_*.json

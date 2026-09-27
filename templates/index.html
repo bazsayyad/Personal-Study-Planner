@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#151311">
+  <meta name="description" content="UniNest is your personal study planner for organizing tasks, notes, resources, and focused study sessions.">
+  <title>UniNest — Personal Study Planner</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,500;1,600&family=DM+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="#dashboard" aria-label="UniNest dashboard">
+        <span class="brand-copy"><strong>UniNest</strong><small>PERSONAL STUDY PLANNER</small></span>
+      </a>
+      <div class="side-label">YOUR WORKSPACE</div>
+      <nav class="nav-list" aria-label="Main navigation">
+        <button class="nav-item is-active" data-view="dashboard"><span class="nav-icon" data-icon="grid"></span><span>Overview</span><span class="nav-active-dot"></span></button>
+        <button class="nav-item" data-view="tasks"><span class="nav-icon" data-icon="check"></span><span>Tasks</span><span class="nav-count" id="task-nav-count">0</span></button>
+        <button class="nav-item" data-view="notes"><span class="nav-icon" data-icon="note"></span><span>Notes</span></button>
+        <button class="nav-item" data-view="resources"><span class="nav-icon" data-icon="link"></span><span>Resources</span></button>
+        <button class="nav-item" data-view="focus"><span class="nav-icon" data-icon="timer"></span><span>Focus room</span></button>
+        <button class="nav-item" data-view="account"><span class="nav-icon" data-icon="user"></span><span>My account</span></button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="quote-card"><span class="quote-mark">“</span><p>Small, steady progress is still progress.</p><span class="quote-by">A NOTE TO YOUR FUTURE SELF</span></div>
+        <div class="local-status"><span class="status-dot"></span><span>Saved on this device</span><span class="local-lock" data-icon="lock"></span></div>
+        <div class="profile"><span class="profile-avatar" id="profile-initial">U</span><button type="button" class="profile-open" data-go="account" aria-label="View and edit account details"><strong id="account-name">My study space</strong><small id="account-email">PERSONAL WORKSPACE</small></button><button class="logout-button" id="logout-button" aria-label="Sign out" title="Sign out">↗</button></div>
+      </div>
+    </aside>
+
+    <main class="main-area">
+      <header class="topbar">
+        <button class="mobile-menu icon-button" id="mobile-menu" aria-label="Open navigation" data-icon="menu"></button>
+        <div class="breadcrumbs"><span>Workspace</span><span class="crumb-sep">/</span><strong id="breadcrumb-current">Overview</strong></div>
+        <div class="top-actions">
+          <span class="top-date" id="top-date"></span>
+          <button class="icon-button theme-toggle" id="theme-toggle" aria-label="Switch theme" title="Switch theme"><span data-icon="sun"></span></button>
+          <button class="export-button" id="export-button"><span data-icon="download"></span><span>Export</span></button>
+          <button type="button" class="top-avatar" id="top-avatar" data-go="account" aria-label="Open account details" title="My account">U</button>
+        </div>
+      </header>
+
+      <div class="content-wrap">
+        <section class="view active-view" id="view-dashboard" data-view-panel="dashboard">
+          <div class="welcome-row">
+            <div><div class="eyebrow"><span class="eyebrow-line"></span> YOUR PERSONAL STUDY PLANNER</div><h1 id="welcome-title">Make today <em>count.</em></h1><p class="page-subtitle">A little structure goes a long way. What would you like to focus on?</p></div>
+            <button class="primary-button" data-go="tasks"><span data-icon="plus"></span>Plan a task</button>
+          </div>
+
+          <article class="hero-card">
+            <div class="hero-grain"></div><div class="hero-orbit orbit-one"></div><div class="hero-orbit orbit-two"></div>
+            <div class="hero-content"><div class="hero-kicker"><span class="live-dot"></span> YOUR SPACE TO THINK CLEARLY</div><h2>Progress, at your<br><span>own pace.</span></h2><p>Gather your thoughts, find your rhythm, and make room for the work that matters.</p><button class="hero-link" data-go="focus">Enter focus room <span data-icon="arrow"></span></button></div>
+            <div class="hero-art" aria-hidden="true"><div class="sun-disc"></div><div class="art-arc arc-a"></div><div class="art-arc arc-b"></div><div class="art-ground"></div><div class="art-spark spark-a">✳</div><div class="art-spark spark-b">✳</div><div class="art-label">FIG. 01 <span>—</span> FIND YOUR FLOW</div></div>
+            <div class="hero-index">01 <span>—</span> 05</div>
+          </article>
+
+          <form id="quick-task-form" class="quick-add-row"><span class="quick-add-icon" data-icon="plus"></span><label for="quick-task-title">A thought for your to-do list?</label><input id="quick-task-title" maxlength="240" placeholder="Add a quick task…"><button type="submit">Add <span data-icon="arrow"></span></button></form>
+
+          <div class="section-heading"><div><span class="section-index">01</span><h2>Your overview</h2></div><span class="updated-label">A clearer view of your week</span></div>
+          <div class="stats-grid">
+            <article class="stat-card stat-progress"><div class="stat-top"><span class="stat-label">COMPLETED TASKS</span><span class="stat-icon" data-icon="chart"></span></div><div class="stat-value"><strong id="stat-completed">0</strong><span id="stat-total">/ 0 tasks</span></div><div class="mini-progress"><span id="progress-fill"></span></div><div class="stat-foot"><span id="progress-copy">Your progress starts here</span><span id="progress-percent">0%</span></div></article>
+            <article class="stat-card"><div class="stat-top"><span class="stat-label">IN YOUR QUEUE</span><span class="stat-icon icon-amber" data-icon="check"></span></div><div class="stat-value"><strong id="stat-pending">0</strong><span>to do</span></div><div class="stat-note"><span class="stat-note-dot"></span>One step at a time</div></article>
+            <article class="stat-card"><div class="stat-top"><span class="stat-label">NOTES CAPTURED</span><span class="stat-icon icon-lilac" data-icon="note"></span></div><div class="stat-value"><strong id="stat-notes">0</strong><span>ideas saved</span></div><div class="stat-note">Your thoughts, all in one place</div></article>
+            <article class="stat-card"><div class="stat-top"><span class="stat-label">STUDY RESOURCES</span><span class="stat-icon icon-sage" data-icon="link"></span></div><div class="stat-value"><strong id="stat-resources">0</strong><span>collected</span></div><div class="stat-note">Knowledge within reach</div></article>
+          </div>
+
+          <div class="dashboard-columns">
+            <article class="surface next-up-surface"><div class="surface-heading"><div><span class="surface-kicker">KEEP YOUR MOMENTUM</span><h3>Next up</h3></div><button class="text-link" data-go="tasks">All tasks <span data-icon="arrow"></span></button></div><div id="dashboard-tasks" class="dashboard-task-list"></div></article>
+            <article class="surface ritual-surface"><div class="ritual-top"><span class="surface-kicker">A SMALL RITUAL</span><span class="ritual-spark">✳</span></div><h3>Focus on one thing.</h3><p>Give a single task your full attention. The rest can wait.</p><button class="ritual-button" data-go="focus"><span data-icon="timer"></span>Start a focus session</button><span class="ritual-decoration" aria-hidden="true">01</span></article>
+          </div>
+          <footer class="page-footer"><span>MADE FOR THE WORK THAT MATTERS.</span><span>TAKE A BREATH. YOU’RE RIGHT ON TIME.</span></footer>
+        </section>
+
+        <section class="view" id="view-tasks" data-view-panel="tasks">
+          <div class="page-title-row"><div><div class="eyebrow"><span class="eyebrow-line"></span> YOUR WORKSPACE / 01</div><h1>Tasks<span class="title-period">.</span></h1><p class="page-subtitle">Make the next step clear. Momentum will follow.</p></div><button class="soft-button" id="task-focus-button"><span data-icon="timer"></span>Focus room</button></div>
+          <div class="task-layout"><section class="surface task-compose"><div class="surface-heading"><div><span class="surface-kicker">GET IT OUT OF YOUR HEAD</span><h3>Add a task</h3></div><span class="compose-index">01 / 03</span></div><form id="task-form" class="form-stack"><label class="field-label" for="task-title">TASK NAME</label><input id="task-title" class="field-input" maxlength="240" placeholder="e.g. Review chapter four" required><div class="field-row"><label class="field-label" for="task-priority">PRIORITY</label><div class="select-wrap"><select id="task-priority"><option>Normal</option><option>High</option><option>Low</option></select><span data-icon="chevron"></span></div></div><button class="primary-button form-submit" type="submit"><span data-icon="plus"></span>Add to my list</button></form><div class="compose-tip"><span data-icon="spark"></span>Start small. Make it doable.</div></section>
+            <section class="surface task-list-surface"><div class="surface-heading"><div><span class="surface-kicker">YOUR STUDY PLAN</span><h3>Everything on your list <span class="inline-count" id="task-list-count">0</span></h3></div><label class="search-field"><span data-icon="search"></span><input id="task-search" placeholder="Find a task…" aria-label="Find a task"></label></div><div class="filter-row"><button class="filter-button active-filter" data-task-filter="all">All tasks</button><button class="filter-button" data-task-filter="pending">To do</button><button class="filter-button" data-task-filter="done">Completed</button><span class="filter-spacer"></span><span class="sort-label">SORTED BY PRIORITY</span></div><div id="task-list" class="task-list"></div></section></div>
+        </section>
+
+        <section class="view" id="view-notes" data-view-panel="notes">
+          <div class="page-title-row"><div><div class="eyebrow"><span class="eyebrow-line"></span> YOUR WORKSPACE / 02</div><h1>Notes<span class="title-period">.</span></h1><p class="page-subtitle">A safe place for the ideas you don’t want to lose.</p></div><span class="view-count" id="note-count">0 NOTES</span></div>
+          <div class="notes-layout"><section class="surface note-compose"><div class="surface-heading"><div><span class="surface-kicker">CAPTURE A THOUGHT</span><h3>New note</h3></div><span class="note-pencil" data-icon="note"></span></div><form id="note-form" class="form-stack"><label class="field-label" for="note-title">TITLE</label><input id="note-title" class="field-input" maxlength="180" placeholder="Give this note a name" required><label class="field-label" for="note-body">YOUR THOUGHTS</label><textarea id="note-body" class="field-input note-body-input" maxlength="12000" placeholder="Jot down an idea, a key insight, or a reminder…" required></textarea><button class="primary-button form-submit" type="submit"><span data-icon="plus"></span>Save note</button></form></section><section class="notes-board"><div class="board-heading"><div><span class="surface-kicker">YOUR PERSONAL ARCHIVE</span><h3>Saved thoughts</h3></div><span class="board-count" id="note-board-count">00</span></div><div id="notes-list" class="notes-grid"></div></section></div>
+        </section>
+
+        <section class="view" id="view-resources" data-view-panel="resources">
+          <div class="page-title-row"><div><div class="eyebrow"><span class="eyebrow-line"></span> YOUR WORKSPACE / 03</div><h1>Resources<span class="title-period">.</span></h1><p class="page-subtitle">Keep your best references close, so getting started feels easy.</p></div><span class="view-count" id="resource-count">0 SAVED</span></div>
+          <section class="surface resource-compose"><div class="surface-heading"><div><span class="surface-kicker">BUILD YOUR REFERENCE SHELF</span><h3>Save a resource</h3></div><span class="resource-ornament">↗</span></div><form id="resource-form" class="resource-form"><div class="resource-fields"><div class="resource-field"><label class="field-label" for="resource-title">RESOURCE NAME</label><input id="resource-title" class="field-input" maxlength="180" placeholder="e.g. Data structures guide" required></div><div class="resource-field resource-url-field"><label class="field-label" for="resource-url">LINK</label><input id="resource-url" class="field-input" type="url" placeholder="https://…" required></div><div class="resource-field resource-kind-field"><label class="field-label" for="resource-kind">TYPE</label><div class="select-wrap"><select id="resource-kind"><option>Link</option><option>PDF</option><option>Video</option><option>Article</option><option>Tool</option></select><span data-icon="chevron"></span></div></div></div><button class="primary-button form-submit" type="submit"><span data-icon="plus"></span>Save resource</button></form></section>
+          <div class="resource-shelf-heading"><div><span class="surface-kicker">YOUR STUDY SHELF</span><h3>Ready when you are</h3></div><span class="shelf-rule"></span><span class="board-count" id="resource-board-count">00</span></div><div id="resources-list" class="resource-grid"></div>
+        </section>
+
+        <section class="view focus-view" id="view-focus" data-view-panel="focus">
+          <div class="page-title-row focus-title-row"><div><div class="eyebrow"><span class="eyebrow-line"></span> YOUR WORKSPACE / 04</div><h1>Focus room<span class="title-period">.</span></h1><p class="page-subtitle">No rush. No noise. Just this moment and the work in front of you.</p></div><span class="focus-status"><span class="status-dot"></span> YOUR TIME, YOURS</span></div>
+          <article class="focus-surface"><div class="focus-orbit focus-orbit-one"></div><div class="focus-orbit focus-orbit-two"></div><div class="focus-inner"><span class="focus-kicker"><span class="live-dot"></span> A LITTLE SPACE TO THINK</span><div class="timer-dial" id="timer-dial"><svg viewBox="0 0 280 280" aria-hidden="true"><circle class="timer-track" cx="140" cy="140" r="126"></circle><circle class="timer-progress-ring" id="timer-ring" cx="140" cy="140" r="126"></circle></svg><div class="timer-center"><span class="timer-label">FOCUS SESSION</span><strong id="timer-display">25<span>:</span>00</strong><span class="timer-subtitle" id="timer-status">Settle in. You’re right where you need to be.</span></div></div><div class="timer-controls"><button class="primary-button timer-main-button" id="timer-start"><span data-icon="play"></span><span>Begin focus</span></button><button class="soft-button timer-control-button" id="timer-reset"><span data-icon="refresh"></span>Reset</button></div><div class="timer-preset-row"><span>SESSION LENGTH</span><div class="preset-buttons"><button class="preset-button is-selected" data-minutes="25">25 min <span>·</span> focus</button><button class="preset-button" data-minutes="50">50 min <span>·</span> deep work</button><button class="preset-button" data-minutes="15">15 min <span>·</span> short sprint</button></div></div><div class="focus-signoff"><span>YOU’VE GOT THIS.</span><span class="signoff-star">✳</span><span>ONE THING AT A TIME.</span></div></div></article>
+        </section>
+        <section class="view" id="view-account" data-view-panel="account">
+          <div class="page-title-row"><div><div class="eyebrow"><span class="eyebrow-line"></span> YOUR PERSONAL SPACE</div><h1>My account<span class="title-period">.</span></h1><p class="page-subtitle">Keep your profile current and your sign-in details up to date.</p></div><span class="view-count">PRIVATE PROFILE</span></div>
+          <div class="account-layout">
+            <section class="surface account-profile-card"><span class="account-avatar" id="account-page-initial">U</span><div><span class="surface-kicker">YOUR UNINEST PROFILE</span><h2 id="account-card-name">My study space</h2><p id="account-card-email">you@example.com</p></div><span class="account-card-orbit" aria-hidden="true"></span></section>
+            <section class="surface account-form-surface"><div class="surface-heading"><div><span class="surface-kicker">PROFILE DETAILS</span><h3>Your information</h3></div><span class="account-section-index">01</span></div><form id="account-form" class="form-stack account-form"><label class="field-label" for="account-name-input">YOUR NAME</label><input class="field-input" id="account-name-input" name="name" maxlength="80" autocomplete="name" required><label class="field-label" for="account-email-input">EMAIL ADDRESS</label><input class="field-input" id="account-email-input" name="email" type="email" maxlength="254" autocomplete="email" required><button class="primary-button form-submit" type="submit"><span data-icon="check"></span>Save profile</button></form></section>
+            <section class="surface account-form-surface account-security-surface"><div class="surface-heading"><div><span class="surface-kicker">ACCOUNT SECURITY</span><h3>Change password</h3></div><span class="account-section-index">02</span></div><form id="password-form" class="form-stack account-form"><label class="field-label" for="current-password">CURRENT PASSWORD</label><input class="field-input" id="current-password" type="password" autocomplete="current-password" required><label class="field-label" for="new-password">NEW PASSWORD</label><input class="field-input" id="new-password" type="password" minlength="8" maxlength="128" autocomplete="new-password" required><label class="field-label" for="confirm-new-password">CONFIRM NEW PASSWORD</label><input class="field-input" id="confirm-new-password" type="password" minlength="8" maxlength="128" autocomplete="new-password" required><button class="soft-button form-submit" type="submit"><span data-icon="lock"></span>Update password</button></form></section>
+          </div>
+        </section>
+        <div id="toast" class="toast" role="status" aria-live="polite"></div>
+      </div>
+    </main>
+  </div>
+  <div class="custom-cursor" id="custom-cursor" aria-hidden="true"><span></span></div>
+</body>
+</html>
