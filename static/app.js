@@ -9,6 +9,7 @@ const icons = {
   sun: '<circle cx="12" cy="12" r="3.8"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"/>',
   moon: '<path d="M20.5 14.1A8.5 8.5 0 0 1 9.9 3.5 8.6 8.6 0 1 0 20.5 14Z"/>',
   download: '<path d="M12 3.5v11m-4-4 4 4 4-4M4.5 17v3h15v-3"/>',
+  upload: '<path d="M12 16V4m-4.5 4.5L12 4l4.5 4.5M4.5 15.5v4h15v-4"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   arrow: '<path d="M4.5 12h14m-5.5-5.5 5.5 5.5-5.5 5.5"/>',
   chart: '<path d="M4 19.5h16M6.5 16V9.5M12 16V5.5M17.5 16v-4"/>',
@@ -463,6 +464,33 @@ $('#export-button').addEventListener('click', async () => {
   } catch (error) { toast(error.message); }
 });
 
+$('#import-button').addEventListener('click', () => $('#import-file').click());
+$('#import-file').addEventListener('change', async (event) => {
+  const file = event.currentTarget.files?.[0];
+  event.currentTarget.value = '';
+  if (!file) return;
+  if (file.size > 8 * 1024 * 1024) {
+    toast('That file is too large. Choose a JSON backup under 8 MB.');
+    return;
+  }
+  if (!window.confirm('Import and add the records in this backup? Your current planner data will be kept.')) return;
+  try {
+    let backup;
+    try { backup = JSON.parse(await file.text()); }
+    catch { throw new Error('This file is not valid JSON.'); }
+    const result = await api('/api/import', { method: 'POST', body: JSON.stringify(backup) });
+    const updated = await api('/api/bootstrap');
+    state.tasks = updated.tasks;
+    state.notes = updated.notes;
+    state.resources = updated.resources;
+    state.theme = updated.theme || state.theme;
+    applyTheme(state.theme);
+    render();
+    const { tasks, notes, resources } = result.added;
+    toast(`Imported ${tasks} tasks, ${notes} notes, and ${resources} resources.`);
+  } catch (error) { toast(error.message); }
+});
+
 $('#mobile-menu').addEventListener('click', () => $('#sidebar').classList.toggle('mobile-open'));
 $('#task-focus-button').addEventListener('click', () => navigate('focus'));
 
@@ -533,30 +561,10 @@ $('#timer-reset').addEventListener('click', () => {
 const cursor = $('#custom-cursor');
 const finePointer = window.matchMedia('(hover: hover) and (pointer: fine)');
 if (finePointer.matches) {
-  let targetX = -100;
-  let targetY = -100;
-  let currentX = targetX;
-  let currentY = targetY;
-  let cursorFrame = 0;
-  const followPointer = () => {
-    currentX += (targetX - currentX) * .34;
-    currentY += (targetY - currentY) * .34;
-    cursor.style.transform = `translate3d(${currentX}px,${currentY}px,0) translate(-50%,-50%)`;
-    if (Math.abs(targetX - currentX) + Math.abs(targetY - currentY) > .12) {
-      cursorFrame = requestAnimationFrame(followPointer);
-    } else {
-      currentX = targetX;
-      currentY = targetY;
-      cursor.style.transform = `translate3d(${currentX}px,${currentY}px,0) translate(-50%,-50%)`;
-      cursorFrame = 0;
-    }
-  };
   window.addEventListener('pointermove', (event) => {
     if (event.pointerType !== 'mouse' && event.pointerType !== 'pen') return;
     document.body.classList.add('has-custom-cursor');
-    targetX = event.clientX;
-    targetY = event.clientY;
-    if (!cursorFrame) cursorFrame = requestAnimationFrame(followPointer);
+    cursor.style.transform = `translate3d(${event.clientX}px,${event.clientY}px,0) translate(-50%,-50%)`;
     cursor.style.opacity = '1';
     cursor.classList.toggle('cursor-hover', Boolean(event.target.closest('button,a,input,textarea,select,[role="button"]')));
   }, { passive: true });

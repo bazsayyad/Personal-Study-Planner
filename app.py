@@ -40,7 +40,8 @@ def session_secret():
 
 app.secret_key = session_secret()
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
-                  SESSION_COOKIE_SECURE=False, PERMANENT_SESSION_LIFETIME=60 * 60 * 24 * 14)
+                  SESSION_COOKIE_SECURE=False, PERMANENT_SESSION_LIFETIME=60 * 60 * 24 * 14,
+                  MAX_CONTENT_LENGTH=8 * 1024 * 1024)
 
 
 @contextmanager
@@ -414,9 +415,11 @@ def set_theme():
 @authenticated
 def export_data():
     with database() as db:
+        theme_row = db.execute("SELECT value FROM settings WHERE key=?", (f"theme:{g.user_id}",)).fetchone()
         content = {
-            "app": "UniNest Study Planner",
+            "app": "UniNest Personal Study Planner",
             "exported_at": datetime.now().isoformat(timespec="seconds"),
+            "theme": theme_row[0] if theme_row and theme_row[0] in ("dark", "light") else "dark",
             "tasks": [dict(row) for row in db.execute("SELECT id,title,priority,done,created FROM tasks WHERE user_id=? ORDER BY id", (g.user_id,))],
             "notes": [dict(row) for row in db.execute("SELECT id,title,body,created FROM notes WHERE user_id=? ORDER BY id", (g.user_id,))],
             "resources": [dict(row) for row in db.execute("SELECT id,title,url,kind,created FROM resources WHERE user_id=? ORDER BY id", (g.user_id,))],
@@ -425,3 +428,70 @@ def export_data():
     return app.response_class(json.dumps(content, ensure_ascii=False, indent=2),
                               mimetype="application/json",
                               headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@app.post("/api/import")
+@authenticated
+def import_data():
+    data = json_body()
+    if data.get("app") not in (None, "UniNest Study Planner", "UniNest Personal Study Planner"):
+        abort(422, description="This file is not a UniNest study planner export.")
+
+    imported = {}
+    for group in ("tasks", "notes", "resources"):
+        rows = data.get(group)
+        if not isinstance(rows, list):
+            abort(422, description=f"The {group} section must be a list.")
+        imported[group] = rows
+    if sum(map(len, imported.values())) > 2000:
+        abort(422, description="Import files can contain up to 2,000 records.")
+
+    now = datetime.now().isoformat(timespec="minutes")
+    tasks, notes, resources = [], [], []
+    for row in imported["tasks"]:
+        if not isinstance(row, dict):
+            abort(422, description="A task entry is invalid.")
+        title = required_text(row, "title", "Task title", 240)
+        priority = row.get("priority", "Normal")
+        done = row.get("done", False)
+        if priority not in ("Normal", "High", "Low") or done not in (True, False, 0, 1):
+            abort(422, description="A task has an invalid priority or completion value.")
+        created = row.get("created", now)
+        if not isinstance(created, str) or len(created) > 64:
+            abort(422, description="A task date is invalid.")
+        tasks.append((title, priority, int(bool(done)), created, g.user_id))
+    for row in imported["notes"]:
+        if not isinstance(row, dict):
+            abort(422, description="A note entry is invalid.")
+        title = required_text(row, "title", "Note title", 180)
+        body = required_text(row, "body", "Note content", 12000)
+        created = row.get("created", now)
+        if not isinstance(created, str) or len(created) > 64:
+            abort(422, description="A note date is invalid.")
+        notes.append((title, body, created, g.user_id))
+    for row in imported["resources"]:
+        if not isinstance(row, dict):
+            abort(422, description="A resource entry is invalid.")
+        title = required_text(row, "title", "Resource name", 180)
+        url = required_text(row, "url", "Resource URL", 2000)
+        parts = urlparse(url)
+        kind = row.get("kind", "Link")
+        if parts.scheme not in ("http", "https") or not parts.netloc:
+            abort(422, description="A resource contains an invalid http:// or https:// link.")
+        if kind not in ("Link", "PDF", "Video", "Article", "Tool"):
+            abort(422, description="A resource has an invalid type.")
+        created = row.get("created", now)
+        if not isinstance(created, str) or len(created) > 64:
+            abort(422, description="A resource date is invalid.")
+        resources.append((title, url, kind, created, g.user_id))
+
+    theme = data.get("theme")
+    if theme is not None and theme not in ("dark", "light"):
+        abort(422, description="The theme value must be dark or light.")
+    with database() as db:
+        db.executemany("INSERT INTO tasks(title,priority,done,created,user_id) VALUES(?,?,?,?,?)", tasks)
+        db.executemany("INSERT INTO notes(title,body,created,user_id) VALUES(?,?,?,?)", notes)
+        db.executemany("INSERT INTO resources(title,url,kind,created,user_id) VALUES(?,?,?,?,?)", resources)
+        if theme:
+            db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", (f"theme:{g.user_id}", theme))
+    return jsonify(added={"tasks": len(tasks), "notes": len(notes), "resources": len(resources)}, theme=theme)
