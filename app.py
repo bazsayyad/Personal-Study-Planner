@@ -22,6 +22,12 @@ from werkzeug.security import check_password_hash, generate_password_hash
 ROOT = Path(__file__).resolve().parent
 DB = ROOT / os.environ.get("UNINEST_DB", "study_planner.db")
 DEMO_MODE = os.environ.get("UNINEST_DEMO") == "1"
+PREFERENCE_DEFAULTS = {
+    "sound_enabled": True,
+    "animations_enabled": True,
+    "motion_blur_enabled": True,
+    "motion_blur_strength": 3,
+}
 app = Flask(__name__, static_folder=str(ROOT / "static"), static_url_path="/static")
 
 
@@ -313,10 +319,13 @@ def bootstrap():
         notes = [dict(row) for row in db.execute("SELECT id,title,body,created FROM notes WHERE user_id=? ORDER BY id DESC", (g.user_id,))]
         resources = [dict(row) for row in db.execute("SELECT id,title,url,kind,created FROM resources WHERE user_id=? ORDER BY id DESC", (g.user_id,))]
         theme_row = db.execute("SELECT value FROM settings WHERE key=?", (f"theme:{g.user_id}",)).fetchone()
+        preferences_row = db.execute("SELECT value FROM settings WHERE key=?", (f"preferences:{g.user_id}",)).fetchone()
         if not theme_row:
             theme_row = db.execute("SELECT value FROM settings WHERE key='theme'").fetchone()
+        preferences = read_preferences(preferences_row[0] if preferences_row else None)
     return jsonify(tasks=tasks, notes=notes, resources=resources,
                    theme=theme_row[0] if theme_row and theme_row[0] in ("dark", "light") else "dark",
+                   preferences=preferences,
                    user=account_for(g.user_id))
 
 
@@ -426,6 +435,50 @@ def set_theme():
     with database() as db:
         db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", (f"theme:{g.user_id}", theme))
     return jsonify(theme=theme)
+
+
+def read_preferences(raw_value):
+    preferences = dict(PREFERENCE_DEFAULTS)
+    if not raw_value:
+        return preferences
+    try:
+        saved = json.loads(raw_value) if isinstance(raw_value, str) else raw_value
+    except (TypeError, json.JSONDecodeError):
+        return preferences
+    if not isinstance(saved, dict):
+        return preferences
+    for key in ("sound_enabled", "animations_enabled", "motion_blur_enabled"):
+        if isinstance(saved.get(key), bool):
+            preferences[key] = saved[key]
+    strength = saved.get("motion_blur_strength")
+    if isinstance(strength, int) and not isinstance(strength, bool):
+        preferences["motion_blur_strength"] = min(8, max(0, strength))
+    return preferences
+
+
+@app.put("/api/settings/preferences")
+@authenticated
+def set_preferences():
+    supplied = json_body().get("preferences")
+    if not isinstance(supplied, dict):
+        abort(422, description="Preferences must be an object.")
+    preferences = dict(PREFERENCE_DEFAULTS)
+    with database() as db:
+        row = db.execute("SELECT value FROM settings WHERE key=?", (f"preferences:{g.user_id}",)).fetchone()
+        preferences.update(read_preferences(row[0] if row else None))
+        for key in ("sound_enabled", "animations_enabled", "motion_blur_enabled"):
+            if key in supplied:
+                if not isinstance(supplied[key], bool):
+                    abort(422, description=f"{key} must be on or off.")
+                preferences[key] = supplied[key]
+        if "motion_blur_strength" in supplied:
+            strength = supplied["motion_blur_strength"]
+            if not isinstance(strength, int) or isinstance(strength, bool) or not 0 <= strength <= 8:
+                abort(422, description="Motion blur strength must be between 0 and 8.")
+            preferences["motion_blur_strength"] = strength
+        db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)",
+                   (f"preferences:{g.user_id}", json.dumps(preferences, separators=(",", ":"))))
+    return jsonify(preferences=preferences)
 
 
 @app.post("/api/coach/plan")
@@ -579,10 +632,12 @@ def save_coach_key():
 def export_data():
     with database() as db:
         theme_row = db.execute("SELECT value FROM settings WHERE key=?", (f"theme:{g.user_id}",)).fetchone()
+        preferences_row = db.execute("SELECT value FROM settings WHERE key=?", (f"preferences:{g.user_id}",)).fetchone()
         content = {
             "app": "UniNest Personal Study Planner",
             "exported_at": datetime.now().isoformat(timespec="seconds"),
             "theme": theme_row[0] if theme_row and theme_row[0] in ("dark", "light") else "dark",
+            "preferences": read_preferences(preferences_row[0] if preferences_row else None),
             "tasks": [dict(row) for row in db.execute("SELECT id,title,priority,done,created,due_date,estimate_minutes FROM tasks WHERE user_id=? ORDER BY id", (g.user_id,))],
             "notes": [dict(row) for row in db.execute("SELECT id,title,body,created FROM notes WHERE user_id=? ORDER BY id", (g.user_id,))],
             "resources": [dict(row) for row in db.execute("SELECT id,title,url,kind,created FROM resources WHERE user_id=? ORDER BY id", (g.user_id,))],
@@ -660,10 +715,25 @@ def import_data():
     theme = data.get("theme")
     if theme is not None and theme not in ("dark", "light"):
         abort(422, description="The theme value must be dark or light.")
+    imported_preferences = data.get("preferences")
+    if imported_preferences is not None:
+        if not isinstance(imported_preferences, dict):
+            abort(422, description="Preferences in this backup are invalid.")
+        imported_preferences = read_preferences(imported_preferences)
+        for key in ("sound_enabled", "animations_enabled", "motion_blur_enabled"):
+            if key in data["preferences"] and not isinstance(data["preferences"][key], bool):
+                abort(422, description=f"{key} in this backup must be on or off.")
+        strength = data["preferences"].get("motion_blur_strength", PREFERENCE_DEFAULTS["motion_blur_strength"])
+        if not isinstance(strength, int) or isinstance(strength, bool) or not 0 <= strength <= 8:
+            abort(422, description="Motion blur strength in this backup must be from 0 to 8.")
     with database() as db:
         db.executemany("INSERT INTO tasks(title,priority,done,created,user_id,due_date,estimate_minutes) VALUES(?,?,?,?,?,?,?)", tasks)
         db.executemany("INSERT INTO notes(title,body,created,user_id) VALUES(?,?,?,?)", notes)
         db.executemany("INSERT INTO resources(title,url,kind,created,user_id) VALUES(?,?,?,?,?)", resources)
         if theme:
             db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", (f"theme:{g.user_id}", theme))
-    return jsonify(added={"tasks": len(tasks), "notes": len(notes), "resources": len(resources)}, theme=theme)
+        if imported_preferences is not None:
+            db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)",
+                       (f"preferences:{g.user_id}", json.dumps(imported_preferences, separators=(",", ":"))))
+    return jsonify(added={"tasks": len(tasks), "notes": len(notes), "resources": len(resources)}, theme=theme,
+                   preferences=imported_preferences)

@@ -21,6 +21,9 @@ const icons = {
   refresh: '<path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9A7 7 0 0 1 18 6l2 6M4 12l2 6a7 7 0 0 0 12.4-3"/>',
   trash: '<path d="M4 7h16m-10 4v6m4-6v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
   external: '<path d="M14 4h6v6m0-6-9 9"/><path d="M18 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5"/>',
+  expand: '<path d="M8 4H4v4m0-4 6 6m6-6h4v4m0-4-6 6M4 16v4h4m-4 0 6-6m10 2v4h-4m4 0-6-6"/>',
+  compress: '<path d="M9 4v5H4m0 0 6-6m5 0 5 6m0 0h-5m5 10v-5m0 0h-5m5 0-6 6m-4-6-6 5m0 0v-5m0 5h5"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1a1.8 1.8 0 0 1-2.5 2.5l-.1-.1a1.8 1.8 0 0 0-3 1.3v.2a1.8 1.8 0 0 1-3.6 0v-.2a1.8 1.8 0 0 0-3-1.3l-.1.1a1.8 1.8 0 0 1-2.5-2.5l.1-.1a1.8 1.8 0 0 0-1.3-3h-.2a1.8 1.8 0 0 1 0-3.6h.2a1.8 1.8 0 0 0 1.3-3l-.1-.1a1.8 1.8 0 0 1 2.5-2.5l.1.1a1.8 1.8 0 0 0 3-1.3v-.2a1.8 1.8 0 0 1 3.6 0v.2a1.8 1.8 0 0 0 3 1.3l.1-.1a1.8 1.8 0 0 1 2.5 2.5l-.1.1a1.8 1.8 0 0 0 1.3 3h.2a1.8 1.8 0 0 1 0 3.6h-.2a1.8 1.8 0 0 0-1.3 3Z"/>',
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
 };
 
@@ -29,7 +32,8 @@ document.querySelectorAll('[data-icon]').forEach((node) => {
   if (icons[key]) node.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${icons[key]}</svg>`;
 });
 
-const state = { tasks: [], notes: [], resources: [], user: null, theme: 'dark', filter: 'all', query: '' };
+const DEFAULT_PREFERENCES = { sound_enabled: true, animations_enabled: true, motion_blur_enabled: true, motion_blur_strength: 3 };
+const state = { tasks: [], notes: [], resources: [], user: null, theme: 'dark', preferences: { ...DEFAULT_PREFERENCES }, focusTaskId: null, filter: 'all', query: '' };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
@@ -141,6 +145,18 @@ function renderTasks() {
   $('#task-list').innerHTML = filtered.length
     ? filtered.map((task) => taskRow(task)).join('')
     : `<div class="task-empty">${emptyState(query ? 'No tasks match that search.' : state.filter === 'done' ? 'Completed tasks will show up here.' : 'Nothing on your list yet. Add one small next step.', 'check')}</div>`;
+  renderFocusTaskOptions();
+}
+
+function renderFocusTaskOptions() {
+  const select = $('#focus-task-select');
+  const openTasks = state.tasks.filter((task) => !task.done);
+  if (!openTasks.some((task) => String(task.id) === String(state.focusTaskId))) state.focusTaskId = null;
+  select.innerHTML = `<option value="">No task selected</option>${openTasks.map((task) => `<option value="${task.id}">${esc(task.title)}</option>`).join('')}`;
+  select.value = state.focusTaskId == null ? '' : String(state.focusTaskId);
+  const selectedTask = openTasks.find((task) => String(task.id) === String(state.focusTaskId));
+  $('#focus-task-current').hidden = !selectedTask;
+  $('#focus-task-current-name').textContent = selectedTask?.title || '';
 }
 
 function renderNotes() {
@@ -163,7 +179,19 @@ function renderResources() {
   }).join('') : emptyState('Your reference shelf is ready. Save a useful link to get started.', 'link');
 }
 
-const pageNames = { dashboard: 'Overview', tasks: 'Tasks', notes: 'Notes', resources: 'Resources', focus: 'Focus room', coach: 'Study Coach', account: 'My account' };
+const pageNames = { dashboard: 'Overview', tasks: 'Tasks', notes: 'Notes', resources: 'Resources', focus: 'Focus room', coach: 'Study Coach', account: 'My account', settings: 'Settings' };
+const sidebarBreakpoint = window.matchMedia('(max-width: 850px)');
+function syncSidebarToggle() {
+  const hidden = $('.app-shell').classList.contains('sidebar-hidden');
+  const mobileOpen = $('#sidebar').classList.contains('mobile-open');
+  const expanded = sidebarBreakpoint.matches ? mobileOpen : !hidden;
+  const label = sidebarBreakpoint.matches
+    ? (mobileOpen ? 'Close navigation' : 'Open navigation')
+    : (hidden ? 'Show sidebar' : 'Hide sidebar');
+  $('#mobile-menu').setAttribute('aria-expanded', String(expanded));
+  $('#mobile-menu').setAttribute('aria-label', label);
+  $('#mobile-menu').title = label;
+}
 let navigationTimer = null;
 let navigationToken = 0;
 function navigate(view) {
@@ -182,6 +210,7 @@ function navigate(view) {
     if (canceledTransition) {
       $$('.nav-item').forEach((button) => button.classList.toggle('is-active', button.dataset.view === view));
       $('#breadcrumb-current').textContent = pageNames[view];
+      $('#task-quick-action').hidden = view !== 'tasks';
       history.replaceState(null, '', `#${view}`);
     }
     return;
@@ -196,9 +225,11 @@ function navigate(view) {
   target.style.setProperty('--page-offset', `${direction * 15}px`);
   $$('.nav-item').forEach((button) => button.classList.toggle('is-active', button.dataset.view === view));
   $('#breadcrumb-current').textContent = pageNames[view];
+  $('#task-quick-action').hidden = view !== 'tasks';
   $('#sidebar').classList.remove('mobile-open');
+  syncSidebarToggle();
   history.replaceState(null, '', `#${view}`);
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  window.scrollTo({ top: 0, behavior: state.preferences.animations_enabled ? 'smooth' : 'instant' });
   const token = ++navigationToken;
   navigationTimer = window.setTimeout(() => {
     if (token !== navigationToken) return;
@@ -209,8 +240,15 @@ function navigate(view) {
     target.classList.add('active-view');
     navigationTimer = null;
     window.setTimeout(() => target.style.removeProperty('--page-offset'), 600);
-  }, current ? 240 : 0);
+  }, current && state.preferences.animations_enabled ? 210 : 0);
 }
+
+$('#breadcrumb-home').addEventListener('click', () => navigate('dashboard'));
+$('#task-quick-action').addEventListener('click', () => {
+  const field = $('#task-title');
+  field.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  window.setTimeout(() => field.focus({ preventScroll: true }), 280);
+});
 
 let audioContext;
 function soundContext() {
@@ -220,6 +258,7 @@ function soundContext() {
 }
 
 function buttonSound() {
+  if (!state.preferences.sound_enabled) return;
   try {
     const context = soundContext();
     const oscillator = audioContext.createOscillator();
@@ -238,6 +277,7 @@ function buttonSound() {
 }
 
 function pageTransitionSound() {
+  if (!state.preferences.sound_enabled) return;
   try {
     const context = soundContext();
     const duration = .19;
@@ -262,6 +302,7 @@ function pageTransitionSound() {
 }
 
 function completionSound() {
+  if (!state.preferences.sound_enabled) return;
   try {
     const context = soundContext();
     const now = context.currentTime;
@@ -279,6 +320,28 @@ function completionSound() {
       oscillator.stop(start + .21);
     });
   } catch { /* Completion feedback is optional; the task state is saved regardless. */ }
+}
+
+function buzzerSound() {
+  if (!state.preferences.sound_enabled) return;
+  try {
+    const context = soundContext();
+    const now = context.currentTime;
+    [587.33, 493.88, 392].forEach((frequency, index) => {
+      const start = now + index * .19;
+      const oscillator = context.createOscillator();
+      const envelope = context.createGain();
+      oscillator.type = 'triangle';
+      oscillator.frequency.setValueAtTime(frequency, start);
+      envelope.gain.setValueAtTime(.0001, start);
+      envelope.gain.linearRampToValueAtTime(.28, start + .025);
+      envelope.gain.setValueAtTime(.28, start + .12);
+      envelope.gain.exponentialRampToValueAtTime(.0001, start + .18);
+      oscillator.connect(envelope).connect(context.destination);
+      oscillator.start(start);
+      oscillator.stop(start + .19);
+    });
+  } catch { /* The focus and break timers still work if audio is unavailable. */ }
 }
 
 document.addEventListener('click', (event) => {
@@ -556,6 +619,56 @@ function applyTheme(theme) {
   localStorage.setItem('uninest-theme', theme);
 }
 
+function applyPreferences() {
+  const preferences = state.preferences;
+  const root = document.documentElement;
+  root.dataset.animations = preferences.animations_enabled ? 'on' : 'off';
+  root.dataset.motionBlur = preferences.motion_blur_enabled ? 'on' : 'off';
+  root.style.setProperty('--motion-blur-strength', `${preferences.motion_blur_enabled ? preferences.motion_blur_strength : 0}px`);
+  root.style.setProperty('--ambient-motion-blur', `${preferences.motion_blur_enabled ? Math.min(preferences.motion_blur_strength * .12, .9) : 0}px`);
+  $('#setting-sounds').checked = preferences.sound_enabled;
+  $('#setting-animations').checked = preferences.animations_enabled;
+  $('#setting-motion-blur').checked = preferences.motion_blur_enabled;
+  $('#setting-blur-strength').value = preferences.motion_blur_strength;
+  $('#blur-strength-value').textContent = `${preferences.motion_blur_strength} px`;
+  $('#blur-strength-control').classList.toggle('is-disabled', !preferences.motion_blur_enabled);
+  $('#setting-blur-strength').disabled = !preferences.motion_blur_enabled;
+}
+
+async function persistPreferences() {
+  try {
+    const result = await api('/api/settings/preferences', {
+      method: 'PUT', body: JSON.stringify({ preferences: state.preferences }),
+    });
+    state.preferences = { ...DEFAULT_PREFERENCES, ...result.preferences };
+    applyPreferences();
+    toast('Preferences saved.');
+  } catch (error) {
+    toast(`Could not save preferences: ${error.message}`);
+  }
+}
+
+$('#setting-sounds').addEventListener('change', (event) => {
+  state.preferences.sound_enabled = event.currentTarget.checked;
+  applyPreferences();
+  persistPreferences();
+});
+$('#setting-animations').addEventListener('change', (event) => {
+  state.preferences.animations_enabled = event.currentTarget.checked;
+  applyPreferences();
+  persistPreferences();
+});
+$('#setting-motion-blur').addEventListener('change', (event) => {
+  state.preferences.motion_blur_enabled = event.currentTarget.checked;
+  applyPreferences();
+  persistPreferences();
+});
+$('#setting-blur-strength').addEventListener('input', (event) => {
+  state.preferences.motion_blur_strength = Number(event.currentTarget.value);
+  applyPreferences();
+});
+$('#setting-blur-strength').addEventListener('change', persistPreferences);
+
 $('#export-button').addEventListener('click', async () => {
   try {
     const response = await fetch('/api/export');
@@ -593,20 +706,48 @@ $('#import-file').addEventListener('change', async (event) => {
     state.notes = updated.notes;
     state.resources = updated.resources;
     state.theme = updated.theme || state.theme;
+    state.preferences = { ...DEFAULT_PREFERENCES, ...(updated.preferences || {}) };
     applyTheme(state.theme);
+    applyPreferences();
     render();
     const { tasks, notes, resources } = result.added;
     toast(`Imported ${tasks} tasks, ${notes} notes, and ${resources} resources.`);
   } catch (error) { toast(error.message); }
 });
 
-$('#mobile-menu').addEventListener('click', () => $('#sidebar').classList.toggle('mobile-open'));
+$('#mobile-menu').addEventListener('click', () => {
+  if (sidebarBreakpoint.matches) {
+    $('#sidebar').classList.toggle('mobile-open');
+  } else {
+    $('.app-shell').classList.toggle('sidebar-hidden');
+  }
+  syncSidebarToggle();
+});
+sidebarBreakpoint.addEventListener('change', () => {
+  $('#sidebar').classList.remove('mobile-open');
+  $('.app-shell').classList.remove('sidebar-hidden');
+  syncSidebarToggle();
+});
+syncSidebarToggle();
 $('#task-focus-button').addEventListener('click', () => navigate('focus'));
 
 const ring = $('#timer-ring');
 const circumference = 2 * Math.PI * 126;
 ring.style.strokeDasharray = circumference;
-let timer = { duration: 25 * 60, remaining: 25 * 60, running: false, endAt: 0, interval: null };
+const BREAK_DURATION = 5 * 60;
+let timer = { mode: 'focus', focusDuration: 25 * 60, duration: 25 * 60, remaining: 25 * 60, running: false, endAt: 0, interval: null };
+
+function syncTimerControls() {
+  const isBreak = timer.mode === 'break';
+  const startIcon = timer.running ? icons.pause : icons.play;
+  const startLabel = timer.running ? `Pause ${isBreak ? 'break' : 'session'}` : isBreak ? 'Start break' : 'Begin focus';
+  $('#timer-start').innerHTML = `<span data-icon="${timer.running ? 'pause' : 'play'}"><svg viewBox="0 0 24 24" aria-hidden="true">${startIcon}</svg></span><span>${startLabel}</span>`;
+  $('#timer-reset').innerHTML = `<span data-icon="refresh"><svg viewBox="0 0 24 24" aria-hidden="true">${icons.refresh}</svg></span>${isBreak ? 'Reset break' : 'Reset'}`;
+  $('#timer-label').textContent = isBreak ? 'SHORT BREAK' : 'FOCUS SESSION';
+  $('#focus-kicker-copy').textContent = isBreak ? 'A MOMENT TO RESET' : 'A LITTLE SPACE TO THINK';
+  $('#timer-preset-row').hidden = isBreak;
+  $('#timer-skip-break').hidden = !isBreak;
+}
 
 function paintTimer() {
   const seconds = Math.max(0, Math.ceil(timer.remaining));
@@ -617,20 +758,47 @@ function paintTimer() {
 
 function choosePreset(minutes, button) {
   if (timer.running) stopTimer();
-  timer.duration = minutes * 60;
+  timer.mode = 'focus';
+  timer.focusDuration = minutes * 60;
+  timer.duration = timer.focusDuration;
   timer.remaining = timer.duration;
   $$('.preset-button').forEach((node) => node.classList.toggle('is-selected', node === button));
+  syncTimerControls();
   paintTimer();
   $('#timer-status').textContent = `${minutes} minutes, just for you.`;
+}
+
+function beginBreak() {
+  timer.mode = 'break';
+  timer.duration = BREAK_DURATION;
+  timer.remaining = BREAK_DURATION;
+  syncTimerControls();
+  paintTimer();
+  $('#timer-status').textContent = 'Focus complete. Let your mind rest for five minutes.';
+  startTimer();
+  toast('Focus complete. Your five-minute break has started.');
+}
+
+function finishBreak(skipped = false) {
+  stopTimer();
+  timer.mode = 'focus';
+  timer.duration = timer.focusDuration;
+  timer.remaining = timer.focusDuration;
+  syncTimerControls();
+  paintTimer();
+  $('#timer-status').textContent = skipped ? 'Break skipped. Ready for your next focus session.' : 'Break complete. Ready when you are.';
+  toast(skipped ? 'Break skipped. Your next focus session is ready.' : 'Break complete. Your next focus session is ready.');
 }
 
 function tickTimer() {
   timer.remaining = Math.max(0, (timer.endAt - Date.now()) / 1000);
   paintTimer();
   if (timer.remaining <= 0) {
+    const completedMode = timer.mode;
     stopTimer();
-    $('#timer-status').textContent = 'Session complete. Take a breath; you earned it.';
-    toast('Focus session complete. Take a short break.');
+    buzzerSound();
+    if (completedMode === 'focus') beginBreak();
+    else finishBreak();
   }
 }
 
@@ -644,18 +812,19 @@ function startTimer() {
   if (timer.remaining <= 0) timer.remaining = timer.duration;
   timer.running = true;
   timer.endAt = Date.now() + timer.remaining * 1000;
-  $('#timer-start').innerHTML = `<span data-icon="pause"></span><span>Pause session</span>`;
-  $('#timer-start span').innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${icons.pause}</svg>`;
-  $('#timer-status').textContent = 'You’re in your focus session. Stay with it.';
-  timer.interval = window.setInterval(tickTimer, 250);
+  syncTimerControls();
+  const focusTask = state.tasks.find((item) => String(item.id) === String(state.focusTaskId));
+  $('#timer-status').textContent = timer.mode === 'break'
+    ? 'Step away, stretch, and let your attention recharge.'
+    : focusTask ? `Stay with “${focusTask.title}”. One thing at a time.` : 'You’re in your focus session. Stay with it.';
+  timer.interval = window.setInterval(tickTimer, 1000);
 }
 
 function stopTimer() {
   timer.running = false;
   clearInterval(timer.interval);
   timer.interval = null;
-  $('#timer-start').innerHTML = `<span data-icon="play"></span><span>Begin focus</span>`;
-  $('#timer-start span').innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${icons.play}</svg>`;
+  syncTimerControls();
   paintTimer();
 }
 
@@ -664,8 +833,44 @@ $('#timer-reset').addEventListener('click', () => {
   stopTimer();
   timer.remaining = timer.duration;
   paintTimer();
-  $('#timer-status').textContent = 'Reset. Start again whenever you’re ready.';
+  $('#timer-status').textContent = timer.mode === 'break'
+    ? 'Break reset. Take the full five minutes.'
+    : 'Reset. Start again whenever you’re ready.';
 });
+$('#timer-skip-break').addEventListener('click', () => finishBreak(true));
+$('#focus-task-select').addEventListener('change', (event) => {
+  state.focusTaskId = event.currentTarget.value || null;
+  renderFocusTaskOptions();
+  if (timer.running && timer.mode === 'focus') {
+    const task = state.tasks.find((item) => String(item.id) === String(state.focusTaskId));
+    $('#timer-status').textContent = task
+      ? `Stay with “${task.title}”. One thing at a time.`
+      : 'You’re in your focus session. Stay with it.';
+  }
+});
+
+const focusSurface = $('#focus-surface');
+const focusFullscreenButton = $('#focus-fullscreen-button');
+function syncFocusFullscreenButton() {
+  const active = document.fullscreenElement === focusSurface;
+  const label = active ? 'Exit full screen' : 'Full screen';
+  const icon = active ? 'compress' : 'expand';
+  focusFullscreenButton.setAttribute('aria-pressed', String(active));
+  focusFullscreenButton.setAttribute('aria-label', active ? 'Exit timer full screen' : 'Make timer full screen');
+  focusFullscreenButton.title = active ? 'Exit full screen (Esc)' : 'Make timer full screen';
+  focusFullscreenButton.innerHTML = `<span data-icon="${icon}"><svg viewBox="0 0 24 24" aria-hidden="true">${icons[icon]}</svg></span><span>${label}</span>`;
+}
+
+focusFullscreenButton.addEventListener('click', async () => {
+  try {
+    if (document.fullscreenElement === focusSurface) await document.exitFullscreen();
+    else await focusSurface.requestFullscreen();
+  } catch {
+    toast('Full screen is unavailable in this browser.');
+  }
+});
+document.addEventListener('fullscreenchange', syncFocusFullscreenButton);
+syncFocusFullscreenButton();
 
 function updateDate() {
   const now = new Date();
@@ -685,8 +890,10 @@ async function init() {
     state.notes = data.notes;
     state.resources = data.resources;
     state.theme = data.theme || localStorage.getItem('uninest-theme') || 'dark';
+    state.preferences = { ...DEFAULT_PREFERENCES, ...(data.preferences || {}) };
     showAccount(data.user);
     applyTheme(state.theme);
+    applyPreferences();
     render();
     updateCoachStatus();
   } catch (error) {
@@ -703,5 +910,6 @@ $('#logout-button').addEventListener('click', async () => {
   finally { window.location.replace('/'); }
 });
 
+syncTimerControls();
 paintTimer();
 init();

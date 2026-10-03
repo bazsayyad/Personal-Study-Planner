@@ -1,84 +1,114 @@
 # UniNest — Personal Study Planner
 
-UniNest is a personal workspace for planning study tasks, collecting notes and useful resources, and protecting focused study time. It is designed for one student to manage their work in a calm, organized place.
+UniNest is a personal study workspace for turning schoolwork into manageable next steps. It brings task planning, notes, useful links, and focused study sessions together in one calm interface. The app runs locally on your computer and saves each account’s planner data in SQLite.
 
-## How the app flows
+## What’s included
+
+### Overview
+
+- Dashboard with task progress, completed and pending counts, note/resource totals, and a quick-add task field.
+- Shortcuts to your tasks and Focus room.
+
+### Tasks
+
+- Create, complete, and delete tasks.
+- Set a priority, optional due date, and estimated study time.
+- Search and filter the list by all, pending, or completed tasks.
+- Select an unfinished task in Focus room to keep your current goal visible.
+
+### Notes and resources
+
+- Save and delete notes for class ideas, reminders, and revision material.
+- Keep links in a resource shelf and label them as links, PDFs, videos, articles, or tools.
+
+### Focus room
+
+- Focus sessions of 15, 25, or 50 minutes.
+- A five-minute break starts when a focus session finishes; the break can be paused, reset, or skipped.
+- A completion chime plays at the end of a focus session or break when sounds are enabled.
+- Choose a task to focus on, and use the full-screen timer for a distraction-reduced view.
+
+### Personalization and accounts
+
+- Register, sign in, edit your name and email, and change your password.
+- Warm dark and light themes, with page transitions and animated decorative artwork.
+- Settings to switch interface sounds, animations, and motion blur on or off, and adjust blur strength.
+- Button sounds are generated in the browser; no audio files are required. Sound and motion preferences are saved to the signed-in account.
+
+### Export and import
+
+- Export planner tasks, notes, resources, theme, and display preferences to a JSON backup.
+- Import a UniNest JSON backup. Imported records are added to the current account; existing records are kept.
+- Backups do not include passwords, account details, the Gemini key, or the current timer countdown.
+
+### Study Coach — still in progress
+
+The optional Study Coach is being developed to make a gentler plan from your unfinished tasks, available study time, and stress check-in. It uses Gemini when configured. The app asks for consent before sending those planning details to the AI service. Notes, resources, name, and email are not sent. A generated plan is only saved if you choose to save it to Notes. Without AI configuration, the rest of the planner remains available.
+
+## How the app works
 
 ```mermaid
 flowchart LR
-    A[Launch UniNest] --> B{Account}
-    B -->|New student| C[Create account]
-    B -->|Returning student| D[Sign in]
-    C --> E[Personal dashboard]
-    D --> E
-    E --> F[Plan and track tasks]
-    E --> G[Write notes]
-    E --> H[Save study resources]
-    E --> I[Focus room and timer]
-    E --> N[Optional Study Coach]
-    F --> J[(Local SQLite database)]
-    G --> J
-    H --> J
-    I --> J
-    J --> K[Export or import JSON backup]
+    A[Launch UniNest] --> B[Sign in or create account]
+    B --> C[Dashboard]
+    C --> D[Tasks]
+    C --> E[Notes and resources]
+    C --> F[Focus room]
+    D --> G[(SQLite database)]
+    E --> G
+    F --> H[Focus timer and break]
+    C --> I[Optional Study Coach]
+    G --> J[JSON export or import]
 ```
-
-### Typical student workflow
-
-1. Start the app and create an account, or sign in.
-2. Review the dashboard for progress and upcoming tasks.
-3. Add study tasks, set their priority, and mark them complete as you work.
-4. Capture useful ideas in Notes and keep links in Resources.
-5. Open Focus room, choose a session length, and start the timer.
-6. Export a JSON backup, or import a previous backup to add its planner data.
-7. Update your profile or password from **My account**.
-
-## Main features
-
-- Dashboard with task progress, quick task entry, and an overview of saved work
-- Task list with priority, completion, search, filters, and deletion
-- Notes and a study resource shelf
-- Focus timer with 15, 25, and 50 minute sessions
-- Study Coach (in progress): optional Gemini-assisted planning around available time and stress check-ins
-- Optional due dates and study-time estimates to help prioritize tasks
-- Account registration, sign-in, profile editing, and password changes
-- Warm dark and light themes, animated page transitions, and theme-aware artwork
-- Button sounds, a theme-tinted arrow cursor, and reduced-motion support
-- JSON export and import; imported tasks, notes, and resources are added to the current planner
-- Local-first storage using SQLite, with planner records separated by account
-
-Study Coach is still being developed. When connected, it asks for consent before sharing unfinished-task details, available time, and the stress check-in with Gemini. It never sends notes, resources, account name, or email. Treat generated plans as drafts; choose **Save plan to Notes** if you want to keep one. Without optional AI configuration, the rest of UniNest works as usual.
 
 ## Technology
 
-- **Backend:** Python and Flask
-- **Database:** SQLite, included with Python
+- **Server and application logic:** Python with Flask
+- **Database:** SQLite
 - **Browser interface:** HTML, CSS, and JavaScript
-- **Dependency:** Flask (listed in `requirements.txt`)
+- **Python package:** Flask, listed in `requirements.txt`
 
-Flask renders the pages and handles browser requests to read and update planner data. SQLite stores accounts, tasks, notes, resources, and theme preference on this computer. Passwords are stored as hashes.
+Python runs the local web server and handles authentication, database operations, exports, imports, and Study Coach requests. HTML, CSS, and JavaScript provide the browser interface and its interactive behavior. No separate database server or front-end build step is needed.
 
-## What you need
+## Project files
+
+```text
+PQC_Project/
+├── app.py                 Flask routes, account logic, SQLite access, import/export, Study Coach
+├── main.py                Starts the local server and opens the browser
+├── legacy_desktop.py      Earlier desktop prototype; not used by the current web launchers
+├── requirements.txt       Python dependencies
+├── run_app.bat            Starts your regular planner
+├── run_demo.bat           Starts the sample-data presentation version
+├── templates/
+│   ├── auth.html          Sign-in and registration screen
+│   └── index.html         Main planner pages
+└── static/
+    ├── app.css            Planner layout, themes, artwork, responsive styles, and motion
+    ├── app.js             Planner interactions, timer, sounds, and browser-side logic
+    ├── auth.css           Sign-in and registration styling
+    └── auth.js            Sign-in and registration interactions
+```
+
+The regular and demo SQLite databases are created locally when needed and are not source-code files. The virtual environment, session secret, database files, and exported backup files are excluded from Git by `.gitignore`.
+
+## Requirements
 
 - Windows 10 or 11
-- Python 3.10 or newer installed and available on PATH
-- Internet access on the first launch so the launcher can install Flask; after setup, the planner data and app run locally
+- Python 3.10 or newer available on PATH
 - A modern browser such as Chrome, Edge, or Firefox
+- Internet access on first launch so the launcher can install Flask
 
-No separate database server or front-end build tools are required.
+After Flask is installed, the planner and its data run locally. No Gemini key is needed for normal planner features.
 
-### Study Coach setup
-
-Study Coach is optional and uses Gemini. Paste your Gemini key into the setup card in UniNest; it stays in server memory until UniNest stops and is not added to account data or JSON exports. The Gemini connection and plan generation are still being refined, so the feature may change. Never add credentials or secret configuration files to this README or commit them to the project. The planner works without Study Coach.
-
-## Run UniNest
+## Run the planner
 
 1. Double-click `run_app.bat`.
-2. On the first launch, the script creates `.venv` and installs Flask.
-3. UniNest opens at <http://127.0.0.1:8000>.
-4. Create an account to begin. Keep the terminal window open while using the app; close it to stop the server.
+2. On the first launch, the launcher creates a virtual environment and installs Flask.
+3. A browser opens to the local planner. Create an account or sign in.
+4. Keep the terminal window open while using UniNest. Close it to stop the server.
 
-To run from a terminal instead:
+To start it manually in PowerShell:
 
 ```powershell
 python -m venv .venv
@@ -87,21 +117,31 @@ python -m pip install -r requirements.txt
 python main.py
 ```
 
-## Classroom demo
+## Run the classroom demo
 
-Double-click `run_demo.bat` to open the presentation version. It uses `study_planner_demo.db`, separate from the regular `study_planner.db`, and supplies sample study data. Select **Explore the demo space** on the sign-in page for one-click access. Changes made in the demo stay in the demo database.
+Double-click `run_demo.bat`. The presentation launcher uses a separate demo database and provides sample data with a one-click demo sign-in. Changes made during the demo stay in the demo database and do not alter your regular planner database.
 
-## Data and backups
+## Data and privacy
 
-- Regular accounts and planner records are stored in `study_planner.db` beside the app.
-- The demo launcher uses `study_planner_demo.db` instead.
-- Use **Export** to download a JSON backup of tasks, notes, resources, and theme.
-- Use **Import** to add those records from a UniNest JSON backup. Existing planner entries are kept; account credentials are not included in the backup.
-- Keep a copy of the database or JSON export somewhere safe if the planner data matters.
+- Regular planner data is stored in `study_planner.db` in the project folder.
+- The demo uses `study_planner_demo.db`.
+- Tasks, notes, resources, settings, and accounts are stored locally; planner records are associated with their account.
+- Passwords are stored as password hashes.
+- JSON backups include planner records, theme, and interface preferences, but exclude credentials and account information.
+- Keep a separate copy of important data using Export or by backing up the database while the app is stopped.
 
-## Before presenting
+### Optional Study Coach setup
 
-- Start with `run_demo.bat` and use the sample workspace to demonstrate the app.
-- Show the task workflow, notes, resources, focus timer, theme switch, account page, and JSON export/import.
-- Explain the local flow: Flask handles requests, SQLite stores the data, and the browser interface presents the planner.
-- Keep the regular planner database separate from the demo database.
+Study Coach can use a Gemini API key. You can connect a key in the Study Coach page; it is held in server memory and cleared when UniNest stops. It is not written to the database or included in JSON exports. Alternatively, configure the `GEMINI_API_KEY` environment variable before launching the app. Do not put API keys, passwords, or other secrets in this README or commit them to the project.
+
+Study Coach is still being worked on. Its suggestions are for study planning, not medical advice or therapy.
+
+## Suggested presentation flow
+
+1. Sign in to the demo workspace and show the Overview dashboard.
+2. Add a task with a priority, due date, and study estimate; then complete it.
+3. Save a note and a study resource.
+4. Open Focus room, select a task, show the timer presets and full-screen control, then explain the automatic break and skip option.
+5. Switch the theme and show the sound, animation, and motion-blur settings.
+6. Demonstrate JSON export and import, and explain that import adds records without replacing current data.
+7. Introduce Study Coach as an optional feature still in progress, including its consent and privacy behavior.
