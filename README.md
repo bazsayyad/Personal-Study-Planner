@@ -9,6 +9,7 @@ UniNest is a personal study workspace for turning schoolwork into manageable nex
 ### Overview
 
 - Dashboard with task progress, completed and pending counts, note/resource totals, and a quick-add task field.
+- A personalized greeting uses the signed-in user’s first name and the browser’s local time.
 - Shortcuts to your tasks and Focus room.
 
 ### Tasks
@@ -44,6 +45,7 @@ UniNest is a personal study workspace for turning schoolwork into manageable nex
 - Register, sign in, edit your name and email, and change your password.
 - Warm dark and light themes, with page transitions and animated decorative artwork.
 - Settings to switch interface sounds, animations, and motion blur on or off, and adjust blur strength.
+- Restore default settings to reset the theme and sensory preferences without changing planner records.
 - Button sounds are generated in the browser; no audio files are required. Sound and motion preferences are saved to the signed-in account.
 
 ### Export and import
@@ -108,7 +110,7 @@ PQC_Project/
     └── auth.js            Sign-in and registration interactions
 ```
 
-The regular and demo SQLite databases are created locally when needed and are not source-code files. The virtual environment, session secret, database files, and exported backup files are excluded from Git by `.gitignore`. JSON export/import also includes task subjects and completed focus-session history.
+The regular and demo SQLite databases are created locally when needed and are not source-code files. The virtual environment, `.env` files, session secret, database files, and exported backup files are excluded from Git by `.gitignore` (`.env.example` may be committed as a template). JSON export/import also includes task subjects and completed focus-session history.
 
 ## Requirements
 
