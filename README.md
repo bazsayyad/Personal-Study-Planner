@@ -2,6 +2,8 @@
 
 UniNest is a personal study workspace for turning schoolwork into manageable next steps. It brings task planning, notes, useful links, and focused study sessions together in one calm interface. The app runs locally on your computer and saves each account’s planner data in SQLite.
 
+> **Testing build — Baz:** UniNest is currently being tested as a locally hosted prototype, not a production service. This version uses Flask’s built-in development server at `127.0.0.1:8000`, local SQLite files (`study_planner.db` and `study_planner_demo.db`), seeded demo data and a demo sign-in (`demo@uninest.local` / `uninest-demo`), an automatically generated local session-secret file (`.uninest-session-key`), and OpenRouter’s changeable free-model router (`openrouter/free`). An OpenRouter key entered in Study Coach is held in server memory only until the app closes. These are temporary testing choices; the demo account and sample content are for presentation only. Do not expose the local development server to the public internet or use real sensitive data in the demo account.
+
 ## What’s included
 
 ### Overview
@@ -13,8 +15,16 @@ UniNest is a personal study workspace for turning schoolwork into manageable nex
 
 - Create, complete, and delete tasks.
 - Set a priority, optional due date, and estimated study time.
+- Filter the task list by subject.
+- See due work grouped into today and overdue, the next seven days, and later or unscheduled.
 - Search and filter the list by all, pending, or completed tasks.
 - Select an unfinished task in Focus room to keep your current goal visible.
+
+### Subjects
+
+- Create a course from the Subjects page without first making a task.
+- Add and complete that course’s tasks in its on-page workspace, or choose it from the task form’s subject list.
+- Older task subject names are brought into the subject list automatically on startup.
 
 ### Notes and resources
 
@@ -27,6 +37,7 @@ UniNest is a personal study workspace for turning schoolwork into manageable nex
 - A five-minute break starts when a focus session finishes; the break can be paused, reset, or skipped.
 - A completion chime plays at the end of a focus session or break when sounds are enabled.
 - Choose a task to focus on, and use the full-screen timer for a distraction-reduced view.
+- Completed focus sessions are logged against the selected task and summarized over the last seven days.
 
 ### Personalization and accounts
 
@@ -38,12 +49,17 @@ UniNest is a personal study workspace for turning schoolwork into manageable nex
 ### Export and import
 
 - Export planner tasks, notes, resources, theme, and display preferences to a JSON backup.
+- Backups include the subject list and completed focus-session history.
 - Import a UniNest JSON backup. Imported records are added to the current account; existing records are kept.
-- Backups do not include passwords, account details, the Gemini key, or the current timer countdown.
+- Backups do not include passwords, account details, AI credentials, or the current timer countdown.
 
-### Study Coach — still in progress
+### Study Coach — chat and quick plans
 
-The optional Study Coach is being developed to make a gentler plan from your unfinished tasks, available study time, and stress check-in. It uses Gemini when configured. The app asks for consent before sending those planning details to the AI service. Notes, resources, name, and email are not sent. A generated plan is only saved if you choose to save it to Notes. Without AI configuration, the rest of the planner remains available.
+Study Coach now supports a short, multi-turn conversation as well as a structured quick plan. Ask a question directly or optionally link unfinished tasks from your planner for context. Chat replies stream into the page as the model writes. Chat history stays in the current browser session and is not saved to your account. With explicit chat consent, the message history and selected task details are sent to OpenRouter; notes, resources, name, and email are not sent.
+
+The conversation is available from the shared top bar throughout the planner, except in Focus room. It opens as a side workspace on larger screens and an inline chat workspace on smaller screens, keeping the conversation close without covering the planner.
+
+The quick-plan tool uses unfinished tasks, available study time, and a stress check-in. With explicit opt-in, chat and quick plans can use OpenRouter's free-model router (`openrouter/free`); free model availability and rate limits vary. Without a key or AI consent, the quick planner makes a basic plan locally. If OpenRouter is unavailable, quick planning falls back to the private plan. A key appears as saved until the first request verifies that it works. Study Coach suggestions are for study planning, not medical advice or therapy.
 
 ## How the app works
 
@@ -57,6 +73,7 @@ flowchart LR
     D --> G[(SQLite database)]
     E --> G
     F --> H[Focus timer and break]
+    F --> K[(Completed focus sessions)]
     C --> I[Optional Study Coach]
     G --> J[JSON export or import]
 ```
@@ -67,6 +84,7 @@ flowchart LR
 - **Database:** SQLite
 - **Browser interface:** HTML, CSS, and JavaScript
 - **Python package:** Flask, listed in `requirements.txt`
+- **Optional AI provider:** OpenRouter; internet access and an API key are needed only for AI-generated plans
 
 Python runs the local web server and handles authentication, database operations, exports, imports, and Study Coach requests. HTML, CSS, and JavaScript provide the browser interface and its interactive behavior. No separate database server or front-end build step is needed.
 
@@ -82,7 +100,7 @@ PQC_Project/
 ├── run_demo.bat           Starts the sample-data presentation version
 ├── templates/
 │   ├── auth.html          Sign-in and registration screen
-│   └── index.html         Main planner pages
+│   └── index.html         Planner, settings, account, and project information pages
 └── static/
     ├── app.css            Planner layout, themes, artwork, responsive styles, and motion
     ├── app.js             Planner interactions, timer, sounds, and browser-side logic
@@ -90,7 +108,7 @@ PQC_Project/
     └── auth.js            Sign-in and registration interactions
 ```
 
-The regular and demo SQLite databases are created locally when needed and are not source-code files. The virtual environment, session secret, database files, and exported backup files are excluded from Git by `.gitignore`.
+The regular and demo SQLite databases are created locally when needed and are not source-code files. The virtual environment, session secret, database files, and exported backup files are excluded from Git by `.gitignore`. JSON export/import also includes task subjects and completed focus-session history.
 
 ## Requirements
 
@@ -98,8 +116,9 @@ The regular and demo SQLite databases are created locally when needed and are no
 - Python 3.10 or newer available on PATH
 - A modern browser such as Chrome, Edge, or Firefox
 - Internet access on first launch so the launcher can install Flask
+- For OpenRouter Study Coach plans only: an OpenRouter account/API key and internet access
 
-After Flask is installed, the planner and its data run locally. No Gemini key is needed for normal planner features.
+After Flask is installed, the planner and its data run locally. Study Coach works without AI; selected task details are sent to OpenRouter only after you connect a key and check its consent box. No AI setup is needed for the other planner features.
 
 ## Run the planner
 
@@ -130,11 +149,12 @@ Double-click `run_demo.bat`. The presentation launcher uses a separate demo data
 - JSON backups include planner records, theme, and interface preferences, but exclude credentials and account information.
 - Keep a separate copy of important data using Export or by backing up the database while the app is stopped.
 
-### Optional Study Coach setup
+### Optional OpenRouter Study Coach setup
 
-Study Coach can use a Gemini API key. You can connect a key in the Study Coach page; it is held in server memory and cleared when UniNest stops. It is not written to the database or included in JSON exports. Alternatively, configure the `GEMINI_API_KEY` environment variable before launching the app. Do not put API keys, passwords, or other secrets in this README or commit them to the project.
+1. Create an API key in [OpenRouter settings](https://openrouter.ai/settings/keys).
+2. Open **Study Coach** in UniNest and paste the key into its setup panel.
 
-Study Coach is still being worked on. Its suggestions are for study planning, not medical advice or therapy.
+UniNest keeps the key in server memory until the app closes; it is not stored in the database or exported. You can instead set `OPENROUTER_API_KEY` before launching UniNest. The model defaults to OpenRouter's free-model router and can be changed with `UNINEST_OPENROUTER_MODEL` if you want to select a specific model. OpenRouter's free router picks from available free models, so response speed can vary. Chat streaming shows text as soon as the provider starts returning it; it cannot remove model startup delays.
 
 ## Suggested presentation flow
 
@@ -144,4 +164,4 @@ Study Coach is still being worked on. Its suggestions are for study planning, no
 4. Open Focus room, select a task, show the timer presets and full-screen control, then explain the automatic break and skip option.
 5. Switch the theme and show the sound, animation, and motion-blur settings.
 6. Demonstrate JSON export and import, and explain that import adds records without replacing current data.
-7. Introduce Study Coach as an optional feature still in progress, including its consent and privacy behavior.
+7. Show the About & project page, then introduce Study Coach as an optional OpenRouter AI feature with a private local fallback and explain its consent behavior.

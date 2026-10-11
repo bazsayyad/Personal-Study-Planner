@@ -14,6 +14,7 @@ const icons = {
   arrow: '<path d="M4.5 12h14m-5.5-5.5 5.5 5.5-5.5 5.5"/>',
   chart: '<path d="M4 19.5h16M6.5 16V9.5M12 16V5.5M17.5 16v-4"/>',
   chevron: '<path d="m7 10 5 5 5-5"/>',
+  close: '<path d="m6 6 12 12M18 6 6 18"/>',
   spark: '<path d="m12 3 1.7 5.3L19 10l-5.3 1.7L12 17l-1.7-5.3L5 10l5.3-1.7L12 3Z"/><path d="m19 15 .8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z"/>',
   search: '<circle cx="10.8" cy="10.8" r="6.3"/><path d="m16 16 4.5 4.5"/>',
   play: '<path d="m8 5 11 7-11 7V5Z"/>',
@@ -33,7 +34,7 @@ document.querySelectorAll('[data-icon]').forEach((node) => {
 });
 
 const DEFAULT_PREFERENCES = { sound_enabled: true, animations_enabled: true, motion_blur_enabled: true, motion_blur_strength: 3 };
-const state = { tasks: [], notes: [], resources: [], user: null, theme: 'dark', preferences: { ...DEFAULT_PREFERENCES }, focusTaskId: null, filter: 'all', query: '' };
+const state = { tasks: [], notes: [], resources: [], subjects: [], focusSessions: [], user: null, theme: 'dark', preferences: { ...DEFAULT_PREFERENCES }, focusTaskId: null, selectedSubjectId: null, filter: 'all', subjectFilter: 'all', query: '' };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
@@ -58,6 +59,8 @@ async function api(path, options = {}) {
 
 let toastTimer;
 let latestCoachPlan = null;
+const coachConversation = [];
+const coachLinkedTaskIds = new Set();
 function toast(message) {
   const node = $('#toast');
   node.textContent = message;
@@ -89,6 +92,9 @@ function render() {
   renderTasks();
   renderNotes();
   renderResources();
+  renderWeekPlanner();
+  renderFocusHistory();
+  renderSubjectsPage();
 }
 
 function renderSummary() {
@@ -121,10 +127,10 @@ function taskRow(task, dashboard = false) {
   const checked = Boolean(task.done);
   const priority = String(task.priority || 'Normal').toLowerCase();
   const taskTitle = `<span class="${dashboard ? 'dashboard-task-title' : 'task-row-title'} ${checked ? 'is-done' : ''}">${esc(task.title)}</span>`;
-  const taskMeta = [task.due_date ? `Due ${formatDueDate(task.due_date)}` : '', task.estimate_minutes ? `${task.estimate_minutes} min` : ''].filter(Boolean).join(' · ');
+  const taskMeta = [task.subject || 'General', task.due_date ? `Due ${formatDueDate(task.due_date)}` : '', task.estimate_minutes ? `${task.estimate_minutes} min` : ''].filter(Boolean).join(' · ');
   return `<div class="${dashboard ? 'dashboard-task-row' : 'task-row'}" style="animation-delay:${Math.min((task.id % 8) * 25, 175)}ms">
     <button class="task-check ${checked ? 'checked' : ''}" data-toggle-task="${task.id}" aria-label="Mark ${esc(task.title)} ${checked ? 'incomplete' : 'complete'}" aria-pressed="${checked}">${checked ? `<svg viewBox="0 0 24 24" aria-hidden="true">${icons.check}</svg>` : ''}</button>
-    ${dashboard ? taskTitle : `<span class="task-row-copy">${taskTitle}${taskMeta ? `<small>${esc(taskMeta)}</small>` : ''}</span>`}
+    ${dashboard ? `<span class="task-row-copy">${taskTitle}<small>${esc(taskMeta)}</small></span>` : `<span class="task-row-copy">${taskTitle}<small>${esc(taskMeta)}</small></span>`}
     ${dashboard ? `<span class="priority-pill ${priority}">${esc(task.priority)}</span>` : `<span class="priority-pill ${priority}">${esc(task.priority)}</span><button class="delete-button" data-delete-task="${task.id}" aria-label="Delete task: ${esc(task.title)}"><svg viewBox="0 0 24 24" aria-hidden="true">${icons.trash}</svg></button>`}
   </div>`;
 }
@@ -134,14 +140,120 @@ function renderDashboardTasks() {
   $('#dashboard-tasks').innerHTML = pending.length
     ? pending.map((task) => taskRow(task, true)).join('')
     : emptyState(state.tasks.length ? 'You cleared your list. Enjoy the breathing room.' : 'Add a task whenever you’re ready.', 'check');
+  if (!$('#coach-sidecar').hidden && !$('#coach-task-picker').hidden) renderCoachTaskPicker();
+}
+
+function localIsoDate(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function renderWeekPlanner() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayKey = localIsoDate(today);
+  const weekEnd = new Date(today);
+  weekEnd.setDate(weekEnd.getDate() + 6);
+  const endKey = localIsoDate(weekEnd);
+  const pending = state.tasks.filter((task) => !task.done);
+  const groups = [
+    { label: 'TODAY & OVERDUE', tasks: pending.filter((task) => task.due_date && task.due_date <= todayKey) },
+    { label: 'NEXT 7 DAYS', tasks: pending.filter((task) => task.due_date > todayKey && task.due_date <= endKey) },
+    { label: 'LATER / NO DATE', tasks: pending.filter((task) => !task.due_date || task.due_date > endKey) },
+  ];
+  const columns = groups.map((group) => `<section class="weekly-column"><span class="weekly-column-label">${group.label}</span>${group.tasks.length
+    ? group.tasks.slice(0, 5).map((task) => `<button class="weekly-task" type="button" data-go="tasks"><strong>${esc(task.title)}</strong><small>${esc(task.subject || 'General')}${task.due_date ? ` · ${formatDueDate(task.due_date)}` : ''}</small></button>`).join('')
+    : '<p class="weekly-empty">Clear for now.</p>'}</section>`).join('');
+  $('#weekly-columns').innerHTML = columns;
+  $('#weekly-columns-page').innerHTML = columns;
+  const weekStart = new Date(today);
+  weekStart.setDate(weekStart.getDate() - 6);
+  const startKey = localIsoDate(weekStart);
+  const weekSessions = state.focusSessions.filter((item) => item.completed_at?.slice(0, 10) >= startKey && item.completed_at?.slice(0, 10) <= todayKey);
+  const minutes = weekSessions.reduce((total, item) => total + Number(item.minutes || 0), 0);
+  $('#weekly-focus-total').textContent = `${minutes} min focused in the last 7 days · ${weekSessions.length} session${weekSessions.length === 1 ? '' : 's'}`;
+  $('#weekly-focus-total-page').textContent = `${minutes} min focused in the last 7 days · ${weekSessions.length} session${weekSessions.length === 1 ? '' : 's'}`;
+}
+
+function renderFocusHistory() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayKey = localIsoDate(today);
+  const weekStart = new Date(today);
+  weekStart.setDate(weekStart.getDate() - 6);
+  const startKey = localIsoDate(weekStart);
+  const recent = state.focusSessions.filter((item) => item.completed_at?.slice(0, 10) >= startKey && item.completed_at?.slice(0, 10) <= todayKey);
+  const minutes = recent.reduce((total, item) => total + Number(item.minutes || 0), 0);
+  $('#focus-week-count').textContent = `${recent.length} LAST 7 DAYS`;
+  $('#focus-history-summary').textContent = recent.length
+    ? `${minutes} focused minutes across ${recent.length} completed session${recent.length === 1 ? '' : 's'} this week.`
+    : 'Finish a focus session to start your study record.';
+  const row = (item) => `<div class="focus-history-item"><span class="status-dot"></span><strong>${esc(item.task_title || 'Independent study')}</strong><span>${item.minutes} min</span><small>${formatDate(item.completed_at)}</small></div>`;
+  $('#focus-history-list').innerHTML = recent.slice(0, 6).map(row).join('');
+  const allMinutes = state.focusSessions.reduce((total, item) => total + Number(item.minutes || 0), 0);
+  $('#history-page-count').textContent = `${state.focusSessions.length} SESSION${state.focusSessions.length === 1 ? '' : 'S'}`;
+  $('#history-total-minutes').textContent = `${allMinutes} min`;
+  $('#history-week-summary').textContent = `${minutes} minutes across ${recent.length} completed session${recent.length === 1 ? '' : 's'} in the last 7 days.`;
+  $('#study-history-list').innerHTML = state.focusSessions.length ? state.focusSessions.map(row).join('') : emptyState('Your completed focus sessions will be collected here.', 'timer');
+}
+
+function renderSubjectsPage() {
+  const taskGroups = new Map();
+  state.tasks.forEach((task) => {
+    const name = task.subject || 'General';
+    const key = name.toLocaleLowerCase();
+    if (!taskGroups.has(key)) taskGroups.set(key, []);
+    taskGroups.get(key).push(task);
+  });
+  const subjects = [...state.subjects];
+  taskGroups.forEach((tasks, key) => {
+    if (!subjects.some((subject) => subject.name.toLocaleLowerCase() === key)) subjects.push({ id: `task-${key}`, name: tasks[0].subject || 'General' });
+  });
+  subjects.sort((a, b) => a.name.localeCompare(b.name));
+  if (!subjects.some((subject) => String(subject.id) === String(state.selectedSubjectId))) state.selectedSubjectId = subjects[0]?.id ?? null;
+  $('#task-subject').innerHTML = subjects.map((subject) => `<option value="${esc(subject.name)}">${esc(subject.name)}</option>`).join('') || '<option value="General">General</option>';
+  $('#subject-overview-grid').innerHTML = subjects.length ? subjects.map((subject) => {
+    const name = subject.name;
+    const tasks = taskGroups.get(name.toLocaleLowerCase()) || [];
+    const pending = tasks.filter((task) => !task.done).length;
+    const completed = tasks.length - pending;
+    const nextDue = tasks.filter((task) => !task.done && task.due_date).map((task) => task.due_date).sort()[0];
+    return `<article class="surface subject-overview-card ${String(subject.id) === String(state.selectedSubjectId) ? 'is-selected' : ''}"><span class="surface-kicker">COURSE / SUBJECT</span><h2>${esc(name)}</h2><div class="subject-card-stats"><span><strong>${pending}</strong><small>TO DO</small></span><span><strong>${completed}</strong><small>DONE</small></span><span><strong>${tasks.length}</strong><small>TOTAL</small></span></div><p>${nextDue ? `Next due · ${formatDueDate(nextDue)}` : 'No upcoming due dates'}</p><button type="button" class="soft-button" data-select-subject="${esc(subject.id)}">${String(subject.id) === String(state.selectedSubjectId) ? 'Selected course' : 'Open course'} <span data-icon="arrow"><svg viewBox="0 0 24 24" aria-hidden="true">${icons.arrow}</svg></span></button></article>`;
+  }).join('') : emptyState('Add your first course above. You can create tasks for it right here.', 'note');
+  const selected = subjects.find((subject) => String(subject.id) === String(state.selectedSubjectId));
+  const detailForm = $('#subject-task-form');
+  const deleteButton = $('#delete-subject-button');
+  if (!selected) {
+    $('#subject-detail-title').textContent = 'Choose a subject';
+    $('#subject-detail-copy').textContent = 'Add a course above, then create and manage its study tasks here.';
+    $('#subject-detail-tasks').innerHTML = emptyState('Your course tasks will appear in this space.', 'check');
+    detailForm.hidden = true;
+    deleteButton.hidden = true;
+    deleteButton.dataset.deleteSubject = '';
+    return;
+  }
+  const selectedTasks = taskGroups.get(selected.name.toLocaleLowerCase()) || [];
+  $('#subject-detail-title').textContent = selected.name;
+  $('#subject-detail-copy').textContent = `${selectedTasks.length} task${selectedTasks.length === 1 ? '' : 's'} in this course`;
+  detailForm.hidden = false;
+  deleteButton.hidden = selected.name.toLocaleLowerCase() === 'general' || !Number.isInteger(Number(selected.id));
+  deleteButton.dataset.deleteSubject = selected.id;
+  $('#subject-detail-tasks').innerHTML = selectedTasks.length ? orderedTasks().filter((task) => (task.subject || 'General').toLocaleLowerCase() === selected.name.toLocaleLowerCase()).map((task) => taskRow(task)).join('') : emptyState('No work here yet. Add one small next step above.', 'check');
 }
 
 function renderTasks() {
   const query = state.query.trim().toLowerCase();
   const filtered = orderedTasks().filter((task) => {
     const matchesFilter = state.filter === 'all' || (state.filter === 'done' ? Boolean(task.done) : !task.done);
-    return matchesFilter && task.title.toLowerCase().includes(query);
+    const matchesSubject = state.subjectFilter === 'all' || (task.subject || 'General') === state.subjectFilter;
+    return matchesFilter && matchesSubject && `${task.title} ${task.subject || 'General'}`.toLowerCase().includes(query);
   });
+  const subjects = [...new Set([...state.subjects.map((subject) => subject.name), ...state.tasks.map((task) => task.subject || 'General')])].sort((a, b) => a.localeCompare(b));
+  const subjectSelect = $('#subject-filter');
+  if (subjectSelect) {
+    if (state.subjectFilter !== 'all' && !subjects.includes(state.subjectFilter)) state.subjectFilter = 'all';
+    subjectSelect.innerHTML = `<option value="all">All subjects</option>${subjects.map((subject) => `<option value="${esc(subject)}">${esc(subject)}</option>`).join('')}`;
+    subjectSelect.value = state.subjectFilter;
+  }
   $('#task-list').innerHTML = filtered.length
     ? filtered.map((task) => taskRow(task)).join('')
     : `<div class="task-empty">${emptyState(query ? 'No tasks match that search.' : state.filter === 'done' ? 'Completed tasks will show up here.' : 'Nothing on your list yet. Add one small next step.', 'check')}</div>`;
@@ -179,7 +291,7 @@ function renderResources() {
   }).join('') : emptyState('Your reference shelf is ready. Save a useful link to get started.', 'link');
 }
 
-const pageNames = { dashboard: 'Overview', tasks: 'Tasks', notes: 'Notes', resources: 'Resources', focus: 'Focus room', coach: 'Study Coach', account: 'My account', settings: 'Settings' };
+const pageNames = { dashboard: 'Overview', tasks: 'Tasks', notes: 'Notes', resources: 'Resources', focus: 'Focus room', coach: 'Study Coach', weekly: 'Weekly planner', subjects: 'Subjects', history: 'Study history', account: 'My account', settings: 'Settings and info' };
 const sidebarBreakpoint = window.matchMedia('(max-width: 850px)');
 function syncSidebarToggle() {
   const hidden = $('.app-shell').classList.contains('sidebar-hidden');
@@ -192,55 +304,92 @@ function syncSidebarToggle() {
   $('#mobile-menu').setAttribute('aria-label', label);
   $('#mobile-menu').title = label;
 }
-let navigationTimer = null;
-let navigationToken = 0;
+let coachPanelTimer = null;
+let coachPanelToken = 0;
+function setCoachSidecarOpen(open) {
+  const focusIsActive = $('.view.active-view')?.dataset.viewPanel === 'focus';
+  const isOpen = Boolean(open && !focusIsActive);
+  const sidecar = $('#coach-sidecar');
+  const toggle = $('#coach-dock-toggle');
+  const wasOpen = !sidecar.hidden;
+  const compactWorkspace = window.matchMedia('(max-width: 1200px)').matches;
+  if (coachPanelTimer) window.clearTimeout(coachPanelTimer);
+  const token = ++coachPanelToken;
+  if (isOpen && !wasOpen && compactWorkspace) coachReturnScrollY = window.scrollY;
+  const workspace = $('#workspace-frame');
+  if (isOpen) {
+    workspace.classList.add('coach-open');
+    sidecar.hidden = false;
+    sidecar.classList.remove('is-closing');
+    sidecar.classList.add('is-opening');
+    coachPanelTimer = window.setTimeout(() => {
+      if (token === coachPanelToken) sidecar.classList.remove('is-opening');
+      coachPanelTimer = null;
+    }, 400);
+  } else if (wasOpen) {
+    sidecar.classList.remove('is-opening');
+    sidecar.classList.add('is-closing');
+    coachPanelTimer = window.setTimeout(() => {
+      if (token !== coachPanelToken) return;
+      sidecar.hidden = true;
+      sidecar.classList.remove('is-closing');
+      workspace.classList.remove('coach-open');
+      workspace.classList.add('coach-restoring');
+      window.setTimeout(() => workspace.classList.remove('coach-restoring'), 340);
+      if (compactWorkspace) window.scrollTo({ top: coachReturnScrollY, behavior: 'instant' });
+      coachPanelTimer = null;
+    }, 300);
+  } else {
+    sidecar.hidden = true;
+    sidecar.classList.remove('is-opening', 'is-closing');
+    workspace.classList.remove('coach-open');
+  }
+  toggle.setAttribute('aria-expanded', String(isOpen));
+  toggle.setAttribute('aria-label', isOpen ? 'Close Study Coach' : 'Open Study Coach');
+  toggle.title = isOpen ? 'Close Study Coach' : 'Open Study Coach';
+  const icon = $('.coach-dock-toggle [data-icon]');
+  icon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${icons[isOpen ? 'close' : 'spark']}</svg>`;
+  $('.coach-dock-label').textContent = isOpen ? 'Close Coach' : 'Talk to Coach';
+  if (isOpen) {
+    renderCoachTaskPicker();
+    requestAnimationFrame(() => {
+      if (compactWorkspace) {
+        const reduceMotion = !state.preferences.animations_enabled || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        sidecar.scrollIntoView({ behavior: reduceMotion ? 'instant' : 'smooth', block: 'start' });
+      } else {
+        $('#coach-chat-input').focus({ preventScroll: true });
+      }
+    });
+  }
+}
+$('#coach-dock-toggle').addEventListener('click', () => setCoachSidecarOpen($('#coach-sidecar').hidden));
+let coachReturnScrollY = 0;
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !$('#coach-sidecar').hidden) setCoachSidecarOpen(false);
+});
 function navigate(view) {
   if (!pageNames[view]) return;
+  $('#coach-dock-toggle').hidden = view === 'focus';
+  if (view === 'focus' || (window.matchMedia('(max-width: 1200px)').matches && !$('#coach-sidecar').hidden)) setCoachSidecarOpen(false);
   const current = $('.view.active-view');
   const target = $(`[data-view-panel="${view}"]`);
-  let canceledTransition = false;
-  if (navigationTimer) {
-    clearTimeout(navigationTimer);
-    navigationTimer = null;
-    navigationToken += 1;
-    canceledTransition = true;
-    $$('.view').forEach((panel) => panel.classList.remove('is-leaving'));
-  }
-  if (current === target) {
-    if (canceledTransition) {
-      $$('.nav-item').forEach((button) => button.classList.toggle('is-active', button.dataset.view === view));
-      $('#breadcrumb-current').textContent = pageNames[view];
-      $('#task-quick-action').hidden = view !== 'tasks';
-      history.replaceState(null, '', `#${view}`);
-    }
-    return;
-  }
+  if (current === target) return;
   if (current) pageTransitionSound();
   const viewOrder = Object.keys(pageNames);
   const direction = viewOrder.indexOf(view) > viewOrder.indexOf(current?.dataset.viewPanel) ? 1 : -1;
-  if (current) {
-    current.style.setProperty('--exit-x', `${direction * -8}px`);
-    current.classList.add('is-leaving');
-  }
-  target.style.setProperty('--page-offset', `${direction * 15}px`);
+  if (current) current.classList.remove('active-view', 'is-leaving');
+  target.classList.remove('is-leaving');
+  target.style.setProperty('--page-offset', `${direction * 10}px`);
+  target.classList.add('active-view');
   $$('.nav-item').forEach((button) => button.classList.toggle('is-active', button.dataset.view === view));
+  $(`[data-view="${view}"]`)?.closest('.nav-group')?.setAttribute('open', '');
   $('#breadcrumb-current').textContent = pageNames[view];
   $('#task-quick-action').hidden = view !== 'tasks';
   $('#sidebar').classList.remove('mobile-open');
   syncSidebarToggle();
   history.replaceState(null, '', `#${view}`);
-  window.scrollTo({ top: 0, behavior: state.preferences.animations_enabled ? 'smooth' : 'instant' });
-  const token = ++navigationToken;
-  navigationTimer = window.setTimeout(() => {
-    if (token !== navigationToken) return;
-    if (current) {
-      current.classList.remove('active-view', 'is-leaving');
-      current.style.removeProperty('--exit-x');
-    }
-    target.classList.add('active-view');
-    navigationTimer = null;
-    window.setTimeout(() => target.style.removeProperty('--page-offset'), 600);
-  }, current && state.preferences.animations_enabled ? 210 : 0);
+  // Swap pages immediately; the new page's sections animate into place.
+  window.scrollTo({ top: 0, behavior: 'instant' });
 }
 
 $('#breadcrumb-home').addEventListener('click', () => navigate('dashboard'));
@@ -364,6 +513,13 @@ document.addEventListener('click', (event) => {
     $$('.filter-button').forEach((button) => button.classList.toggle('active-filter', button === filter));
     renderTasks();
   }
+  const subjectCard = event.target.closest('[data-select-subject]');
+  if (subjectCard) {
+    state.selectedSubjectId = subjectCard.dataset.selectSubject;
+    renderSubjectsPage();
+  }
+  const deleteSubject = event.target.closest('[data-delete-subject]');
+  if (deleteSubject?.dataset.deleteSubject && window.confirm('Delete this subject? Its tasks will be moved to General.')) deleteSubjectRecord(Number(deleteSubject.dataset.deleteSubject));
   const preset = event.target.closest('[data-minutes]');
   if (preset) choosePreset(Number(preset.dataset.minutes), preset);
 });
@@ -374,6 +530,8 @@ async function submitTask(title, priority = 'Normal', planning = {}) {
   renderSummary();
   renderDashboardTasks();
   renderTasks();
+  renderWeekPlanner();
+  renderSubjectsPage();
   toast('Task added to your plan.');
 }
 
@@ -384,6 +542,7 @@ $('#task-form').addEventListener('submit', async (event) => {
   try {
     const estimate = $('#task-estimate').value;
     await submitTask(title, $('#task-priority').value, {
+      subject: $('#task-subject').value.trim() || 'General',
       due_date: $('#task-due-date').value || null,
       estimate_minutes: estimate ? Number(estimate) : null,
     });
@@ -391,6 +550,51 @@ $('#task-form').addEventListener('submit', async (event) => {
     $('#task-title').focus();
   } catch (error) { toast(error.message); }
 });
+
+$('#subject-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const input = $('#subject-name');
+  const name = input.value.trim();
+  if (!name) return;
+  try {
+    const subject = await api('/api/subjects', { method: 'POST', body: JSON.stringify({ name }) });
+    state.subjects.push(subject);
+    state.selectedSubjectId = subject.id;
+    event.currentTarget.reset();
+    renderSubjectsPage();
+    renderTasks();
+    toast(`${subject.name} added to your subjects.`);
+  } catch (error) { toast(error.message); }
+});
+
+$('#subject-task-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const subject = state.subjects.find((item) => String(item.id) === String(state.selectedSubjectId))
+    || (() => {
+      const task = state.tasks.find((item) => `task-${(item.subject || 'General').toLocaleLowerCase()}` === String(state.selectedSubjectId));
+      return task ? { name: task.subject || 'General' } : null;
+    })();
+  const task = $('#subject-task-title').value.trim();
+  if (!subject || !task) return;
+  try {
+    await submitTask(task, 'Normal', { subject: subject.name });
+    event.currentTarget.reset();
+    $('#subject-task-title').focus();
+  } catch (error) { toast(error.message); }
+});
+
+async function deleteSubjectRecord(id) {
+  try {
+    const deleted = state.subjects.find((subject) => Number(subject.id) === id);
+    const removed = await api(`/api/subjects/${id}`, { method: 'DELETE' });
+    state.subjects = state.subjects.filter((subject) => Number(subject.id) !== id);
+    if (removed.general && !state.subjects.some((subject) => subject.name.toLocaleLowerCase() === 'general')) state.subjects.push(removed.general);
+    state.tasks = state.tasks.map((task) => task.subject?.toLocaleLowerCase() === deleted?.name.toLocaleLowerCase() ? { ...task, subject: 'General' } : task);
+    state.selectedSubjectId = state.subjects[0]?.id ?? null;
+    render();
+    toast('Subject removed. Its tasks are now under General.');
+  } catch (error) { toast(error.message); }
+}
 
 $('#quick-task-form').addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -435,7 +639,6 @@ function showAccount(user) {
   const email = user?.email || '';
   const initial = (name.trim()[0] || email[0] || 'U').toUpperCase();
   $('#account-name').textContent = name;
-  $('#account-email').textContent = email;
   $('#profile-initial').textContent = initial;
   $('#top-avatar').textContent = initial;
   $('#account-page-initial').textContent = initial;
@@ -443,6 +646,7 @@ function showAccount(user) {
   $('#account-card-email').textContent = email;
   $('#account-name-input').value = name;
   $('#account-email-input').value = email;
+  updateWelcomeGreeting();
 }
 
 $('#account-form').addEventListener('submit', async (event) => {
@@ -482,10 +686,168 @@ async function updateCoachStatus() {
   try {
     const status = await api('/api/coach/status');
     $('#coach-config-note').hidden = status.available;
+    $('#coach-setup-message').textContent = status.setup_message;
     $('#coach-live-status').classList.toggle('coach-ready', status.available);
-    $('#coach-live-status span:last-child').textContent = status.available ? 'GEMINI KEY SET · READY TO TRY' : 'GEMINI SETUP NEEDED';
+    $('#coach-live-status span:last-child').textContent = status.available ? 'OPENROUTER KEY SAVED · CHECK ON USE' : 'PRIVATE PLAN READY · AI (OPTIONAL)';
   } catch { /* Study Coach setup status must not interrupt the rest of the planner. */ }
 }
+
+function renderCoachTaskPicker() {
+  const picker = $('#coach-task-picker');
+  if (!picker) return;
+  const tasks = state.tasks.filter((task) => !task.done);
+  const availableIds = new Set(tasks.map((task) => Number(task.id)));
+  coachLinkedTaskIds.forEach((id) => { if (!availableIds.has(id)) coachLinkedTaskIds.delete(id); });
+  $('#coach-context-count').textContent = coachLinkedTaskIds.size ? `${coachLinkedTaskIds.size} linked` : '(Optional)';
+  picker.innerHTML = tasks.length ? tasks.map((task) => `<label class="coach-task-choice"><input type="checkbox" value="${task.id}" ${coachLinkedTaskIds.has(Number(task.id)) ? 'checked' : ''}><span><strong>${esc(task.title)}</strong><small>${esc(task.subject || 'General')} · ${esc(task.priority || 'Normal')}${task.due_date ? ` · due ${esc(formatDueDate(task.due_date))}` : ''}</small></span></label>`).join('') : '<p class="coach-task-empty">No unfinished tasks yet. You can still chat without linking one.</p>';
+}
+
+function appendCoachChatMessage(role, content = '', thinking = false) {
+  const log = $('#coach-chat-messages');
+  const article = document.createElement('article');
+  article.className = `coach-chat-message ${role === 'user' ? 'user-message' : 'assistant-message'}${thinking ? ' is-thinking' : ''}`;
+  const label = document.createElement('span');
+  label.className = 'chat-message-label';
+  label.textContent = role === 'user' ? 'YOU' : 'UNINEST STUDY COACH';
+  const paragraph = document.createElement('p');
+  renderCoachMessage(paragraph, content);
+  article.append(label, paragraph);
+  log.append(article);
+  log.scrollTop = log.scrollHeight;
+  return { article, paragraph };
+}
+
+function renderCoachMessage(paragraph, content) {
+  // Escape model output first, then apply only a small, safe subset of Markdown.
+  paragraph.innerHTML = esc(content)
+    .replace(/\*\*(.+?)\*\*/gs, '<strong>$1</strong>')
+    .replace(/__(.+?)__/gs, '<strong>$1</strong>')
+    .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+    .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+}
+
+$('#coach-context-toggle').addEventListener('click', () => {
+  renderCoachTaskPicker();
+  const picker = $('#coach-task-picker');
+  picker.hidden = !picker.hidden;
+  $('#coach-context-toggle').setAttribute('aria-expanded', String(!picker.hidden));
+});
+
+$('#coach-task-picker').addEventListener('change', (event) => {
+  const checkbox = event.target.closest('input[type="checkbox"]');
+  if (!checkbox) return;
+  const id = Number(checkbox.value);
+  if (checkbox.checked) coachLinkedTaskIds.add(id);
+  else coachLinkedTaskIds.delete(id);
+  renderCoachTaskPicker();
+});
+
+$('#coach-chat-reset').addEventListener('click', () => {
+  coachConversation.length = 0;
+  coachLinkedTaskIds.clear();
+  $('#coach-chat-consent').checked = false;
+  $('#coach-chat-input').value = '';
+  $('#coach-chat-messages').innerHTML = '<article class="coach-chat-message assistant-message"><span class="chat-message-label">UNINEST STUDY COACH</span><p>Hi. What’s on your mind? We can break down an assignment, choose what to study next, or just talk through a busy day. Link tasks if you want me to use them.</p></article>';
+  renderCoachTaskPicker();
+});
+
+$('#coach-chat-input').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    $('#coach-chat-form').requestSubmit();
+  }
+});
+
+$('#coach-chat-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const input = $('#coach-chat-input');
+  const prompt = input.value.trim();
+  if (!prompt) return;
+  if (!$('#coach-chat-consent').checked) {
+    toast('Allow OpenRouter to receive this message in order to chat. For an on-device plan, open Study Coach and use its private planner.');
+    return;
+  }
+  const send = $('#coach-chat-send');
+  const reset = $('#coach-chat-reset');
+  const sendLabel = send.querySelector('span:last-child');
+  send.disabled = true;
+  reset.disabled = true;
+  sendLabel.textContent = 'Thinking';
+  input.value = '';
+  appendCoachChatMessage('user', prompt);
+  const reply = appendCoachChatMessage('assistant', '', true);
+  try {
+    const response = await fetch('/api/coach/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: [...coachConversation, { role: 'user', content: prompt }].slice(-12), task_ids: [...coachLinkedTaskIds], share_with_ai: true }),
+    });
+    if (!response.ok) {
+      let message = 'Study Coach could not start the conversation.';
+      try { message = (await response.json()).detail || message; } catch { /* Keep the friendly fallback. */ }
+      if (response.status === 503) {
+        $('#coach-config-note').hidden = false;
+        if ($('.view.active-view')?.dataset.viewPanel !== 'coach') {
+          if (window.matchMedia('(max-width: 1200px)').matches) setCoachSidecarOpen(false);
+          navigate('coach');
+          window.setTimeout(() => $('#coach-config-note').scrollIntoView({ behavior: 'smooth', block: 'center' }), 300);
+        } else {
+          $('#coach-config-note').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }
+      throw new Error(message);
+    }
+    if (!response.body) throw new Error('This browser could not open a streamed reply. Try refreshing the page.');
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let replyText = '';
+    let streamError = '';
+    const processEvent = (eventText) => {
+      const dataLine = eventText.split('\n').find((line) => line.startsWith('data:'));
+      if (!dataLine) return;
+      let packet;
+      try { packet = JSON.parse(dataLine.slice(5).trim()); } catch { return; }
+      if (packet.type === 'delta' && typeof packet.text === 'string') {
+        reply.article.classList.remove('is-thinking');
+        replyText += packet.text;
+        renderCoachMessage(reply.paragraph, replyText);
+        $('#coach-chat-messages').scrollTop = $('#coach-chat-messages').scrollHeight;
+      } else if (packet.type === 'error') streamError = packet.message || 'OpenRouter could not complete the reply.';
+    };
+    while (true) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done }).replace(/\r\n/g, '\n');
+      const events = buffer.split('\n\n');
+      buffer = events.pop() || '';
+      events.forEach(processEvent);
+      if (done) break;
+    }
+    if (buffer.trim()) processEvent(buffer);
+    reply.article.classList.remove('is-thinking');
+    if (streamError) {
+      if (!replyText) reply.paragraph.textContent = streamError;
+      if (streamError.includes('rejected this key')) await updateCoachStatus();
+      toast(streamError);
+    } else if (replyText) {
+      coachConversation.push({ role: 'user', content: prompt });
+      coachConversation.push({ role: 'assistant', content: replyText });
+      if (coachConversation.length > 16) coachConversation.splice(0, coachConversation.length - 16);
+    } else {
+      reply.paragraph.textContent = 'I could not get a reply this time. Please try again.';
+      toast('OpenRouter returned an empty response. Try again in a moment.');
+    }
+  } catch (error) {
+    reply.article.classList.remove('is-thinking');
+    if (!reply.paragraph.textContent) reply.paragraph.textContent = error.message;
+    toast(error.message);
+  } finally {
+    send.disabled = false;
+    reset.disabled = false;
+    sendLabel.textContent = 'Send';
+    input.focus();
+  }
+});
 
 $('#coach-key-form').addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -499,12 +861,12 @@ $('#coach-key-form').addEventListener('submit', async (event) => {
     await api('/api/coach/key', { method: 'PUT', body: JSON.stringify({ api_key: apiKey }) });
     input.value = '';
     await updateCoachStatus();
-    toast('Key saved for this UniNest session.');
+    toast('OpenRouter key saved for this session. It will be checked when you use Study Coach.');
   } catch (error) {
     toast(error.message);
   } finally {
     button.disabled = false;
-    button.textContent = 'Connect Gemini';
+    button.textContent = 'Connect key';
   }
 });
 
@@ -513,7 +875,8 @@ function renderCoachPlan(plan) {
   const steps = plan.steps.map((step, index) => `${index ? `<div class="coach-break"><span>✳</span> ${plan.break_minutes}-minute reset</div>` : ''}
     <article class="coach-step"><span class="coach-step-index">${String(index + 1).padStart(2, '0')}</span><div class="coach-step-copy"><span class="coach-task-name">${esc(step.task_title)}</span><h4>${esc(step.action)}</h4><p>${esc(step.reason)}</p></div><span class="coach-step-time">${step.minutes} <small>MIN</small></span></article>`).join('');
   const result = $('#coach-result');
-  result.innerHTML = `<div class="coach-result-heading"><div><span class="surface-kicker">YOUR PLAN, AT YOUR PACE</span><h2>${esc(plan.headline)}</h2><p>${esc(plan.support)}</p></div><span class="coach-plan-total">${plan.available_minutes}<small>MIN AVAILABLE</small></span></div><div class="coach-timeline">${steps}</div><div class="coach-result-footer"><p>${esc(plan.closing)}</p><button type="button" class="soft-button" id="save-coach-plan"><span data-icon="note"></span>Save plan to Notes</button></div>`;
+  const sourceLabel = plan.source === 'openrouter' ? 'OPENROUTER AI PLAN' : plan.source === 'local_fallback' ? 'PRIVATE PLAN · AI UNAVAILABLE' : 'PRIVATE PLAN · NO TASK DATA SENT';
+  result.innerHTML = `<div class="coach-result-heading"><div><span class="surface-kicker">${sourceLabel}</span><h2>${esc(plan.headline)}</h2><p>${esc(plan.support)}</p></div><span class="coach-plan-total">${plan.available_minutes}<small>MIN AVAILABLE</small></span></div><div class="coach-timeline">${steps}</div><div class="coach-result-footer"><p>${esc(plan.closing)}</p><button type="button" class="soft-button" id="save-coach-plan"><span data-icon="note"></span>Save plan to Notes</button></div>`;
   const icon = $('#save-coach-plan [data-icon="note"]');
   if (icon) icon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${icons.note}</svg>`;
   result.hidden = false;
@@ -532,12 +895,15 @@ $('#coach-form').addEventListener('submit', async (event) => {
       share_with_ai: $('#coach-consent').checked,
     }) });
     renderCoachPlan(plan);
+    if (plan.source === 'local_fallback') {
+      await updateCoachStatus();
+      toast(plan.fallback_reason || 'OpenRouter could not make a plan, so UniNest made a private basic plan instead.');
+    }
   } catch (error) {
     toast(error.message);
-    if (error.status === 503 && error.message.includes('Connect a Gemini key below')) $('#coach-config-note').hidden = false;
-    if (error.status === 502 && error.message.toLowerCase().includes('gemini rejected the api key')) {
+    if (error.status === 502 && error.message.includes('OpenRouter rejected this API key')) {
       $('#coach-config-note').hidden = false;
-      $('#coach-live-status span:last-child').textContent = 'CHECK YOUR KEY';
+      await updateCoachStatus();
     }
   } finally {
     submit.disabled = false;
@@ -575,15 +941,26 @@ document.addEventListener('click', async (event) => {
 });
 
 $('#task-search').addEventListener('input', (event) => { state.query = event.target.value; renderTasks(); });
+$('#subject-filter').addEventListener('change', (event) => { state.subjectFilter = event.target.value; renderTasks(); });
 
 async function toggleTask(id) {
   try {
     const updated = await api(`/api/tasks/${id}`, { method: 'PATCH' });
     state.tasks = state.tasks.map((task) => task.id === id ? updated : task);
-    if (updated.done) completionSound();
+    if (updated.done) {
+      completionSound();
+    }
     renderSummary();
     renderDashboardTasks();
     renderTasks();
+    renderWeekPlanner();
+    renderSubjectsPage();
+    if (updated.done && state.preferences.animations_enabled
+      && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      const checkButtons = $$(`[data-toggle-task="${id}"]`);
+      checkButtons.forEach((button) => button.classList.add('just-completed'));
+      window.setTimeout(() => checkButtons.forEach((button) => button.classList.remove('just-completed')), 480);
+    }
   } catch (error) { toast(error.message); }
 }
 
@@ -596,6 +973,8 @@ async function removeRecord(group, id) {
     if (group === 'tasks') {
       renderDashboardTasks();
       renderTasks();
+      renderWeekPlanner();
+      renderSubjectsPage();
     } else if (group === 'notes') renderNotes();
     else renderResources();
     toast(`${group === 'tasks' ? 'Task' : group === 'notes' ? 'Note' : 'Resource'} removed.`);
@@ -669,6 +1048,24 @@ $('#setting-blur-strength').addEventListener('input', (event) => {
 });
 $('#setting-blur-strength').addEventListener('change', persistPreferences);
 
+$('#settings-reset').addEventListener('click', async (event) => {
+  if (!window.confirm('Reset theme, sound, animations, and motion blur to their defaults? Your tasks, notes, resources, and study history will stay unchanged.')) return;
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const result = await api('/api/settings/reset', { method: 'POST' });
+    state.theme = result.theme;
+    state.preferences = { ...DEFAULT_PREFERENCES, ...result.preferences };
+    applyTheme(state.theme);
+    applyPreferences();
+    toast('Settings restored to defaults.');
+  } catch (error) {
+    toast(`Could not reset settings: ${error.message}`);
+  } finally {
+    button.disabled = false;
+  }
+});
+
 $('#export-button').addEventListener('click', async () => {
   try {
     const response = await fetch('/api/export');
@@ -705,13 +1102,15 @@ $('#import-file').addEventListener('change', async (event) => {
     state.tasks = updated.tasks;
     state.notes = updated.notes;
     state.resources = updated.resources;
+    state.subjects = updated.subjects || [];
+    state.focusSessions = updated.focus_sessions || [];
     state.theme = updated.theme || state.theme;
     state.preferences = { ...DEFAULT_PREFERENCES, ...(updated.preferences || {}) };
     applyTheme(state.theme);
     applyPreferences();
     render();
-    const { tasks, notes, resources } = result.added;
-    toast(`Imported ${tasks} tasks, ${notes} notes, and ${resources} resources.`);
+    const { tasks, notes, resources, focus_sessions: sessions = 0, subjects = 0 } = result.added;
+    toast(`Imported ${subjects} subjects, ${tasks} tasks, ${notes} notes, ${resources} resources, and ${sessions} focus sessions.`);
   } catch (error) { toast(error.message); }
 });
 
@@ -797,9 +1196,26 @@ function tickTimer() {
     const completedMode = timer.mode;
     stopTimer();
     buzzerSound();
-    if (completedMode === 'focus') beginBreak();
+    if (completedMode === 'focus') {
+      saveFocusSession();
+      beginBreak();
+    }
     else finishBreak();
   }
+}
+
+async function saveFocusSession() {
+  const selected = state.tasks.find((item) => String(item.id) === String(state.focusTaskId));
+  try {
+    const record = await api('/api/focus/sessions', { method: 'POST', body: JSON.stringify({
+      task_id: selected?.id ?? null,
+      minutes: Math.round(timer.focusDuration / 60),
+    }) });
+    state.focusSessions.unshift(record);
+    renderFocusHistory();
+    renderWeekPlanner();
+    toast('Focus session logged. Nice work.');
+  } catch (error) { toast(`Session ended, but could not save its record: ${error.message}`); }
 }
 
 function startTimer() {
@@ -875,10 +1291,28 @@ syncFocusFullscreenButton();
 function updateDate() {
   const now = new Date();
   $('#top-date').textContent = new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric' }).format(now).toUpperCase();
-  const hour = now.getHours();
-  const greeting = hour < 12 ? 'Good morning.' : hour < 17 ? 'Good afternoon.' : 'Good evening.';
-  $('#welcome-title').innerHTML = `${greeting.replace(/\.$/, '')} <em>Make it count.</em>`;
+  updateWelcomeGreeting();
 }
+
+function updateWelcomeGreeting() {
+  const hour = new Date().getHours();
+  const greeting = hour < 5 || hour >= 21
+    ? 'Good night'
+    : hour < 12
+      ? 'Good morning'
+      : hour < 17
+        ? 'Good afternoon'
+        : 'Good evening';
+  const firstName = String(state.user?.name || '').trim().split(/\s+/)[0];
+  if (firstName) $('#welcome-title').textContent = `${greeting}, ${firstName}.`;
+}
+
+window.setInterval(updateDate, 60_000);
+
+document.addEventListener('visibilitychange', () => {
+  document.documentElement.dataset.documentHidden = String(document.hidden);
+});
+document.documentElement.dataset.documentHidden = String(document.hidden);
 
 async function init() {
   updateDate();
@@ -889,6 +1323,8 @@ async function init() {
     state.tasks = data.tasks;
     state.notes = data.notes;
     state.resources = data.resources;
+    state.subjects = data.subjects || [];
+    state.focusSessions = data.focus_sessions || [];
     state.theme = data.theme || localStorage.getItem('uninest-theme') || 'dark';
     state.preferences = { ...DEFAULT_PREFERENCES, ...(data.preferences || {}) };
     showAccount(data.user);
