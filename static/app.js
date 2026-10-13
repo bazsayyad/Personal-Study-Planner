@@ -995,7 +995,6 @@ function applyTheme(theme) {
   $('#theme-toggle').title = theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
   const meta = $('meta[name="theme-color"]');
   if (meta) meta.content = theme === 'dark' ? '#151311' : '#f2eee7';
-  localStorage.setItem('uninest-theme', theme);
 }
 
 function applyPreferences() {
@@ -1325,7 +1324,7 @@ async function init() {
     state.resources = data.resources;
     state.subjects = data.subjects || [];
     state.focusSessions = data.focus_sessions || [];
-    state.theme = data.theme || localStorage.getItem('uninest-theme') || 'dark';
+    state.theme = data.theme || 'dark';
     state.preferences = { ...DEFAULT_PREFERENCES, ...(data.preferences || {}) };
     showAccount(data.user);
     applyTheme(state.theme);

@@ -1,7 +1,9 @@
-"""UniNest browser app: local accounts, Flask API, and SQLite storage."""
+"""UniNest browser app: local SQLite, hosted PostgreSQL, or Cloudflare D1."""
 from __future__ import annotations
 
 import json
+import hashlib
+import hmac
 import os
 import re
 import secrets
@@ -21,7 +23,16 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 ROOT = Path(__file__).resolve().parent
 DB = ROOT / os.environ.get("UNINEST_DB", "study_planner.db")
+DATABASE_URL = os.environ.get("DATABASE_URL") or os.environ.get("UNINEST_DATABASE_URL")
+CLOUDFLARE_MODE = os.environ.get("UNINEST_CLOUDFLARE") == "1"
+if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = "postgresql://" + DATABASE_URL.removeprefix("postgres://")
+if DATABASE_URL and not DATABASE_URL.startswith("postgresql://"):
+    raise RuntimeError("DATABASE_URL must be a PostgreSQL URL, or unset to use local SQLite.")
+USE_POSTGRES = bool(DATABASE_URL)
 DEMO_MODE = os.environ.get("UNINEST_DEMO") == "1"
+if (USE_POSTGRES or CLOUDFLARE_MODE) and DEMO_MODE:
+    raise RuntimeError("Demo sign-in is restricted to local SQLite mode; do not enable it on a hosted database.")
 PREFERENCE_DEFAULTS = {
     "sound_enabled": True,
     "animations_enabled": True,
@@ -32,9 +43,16 @@ app = Flask(__name__, static_folder=str(ROOT / "static"), static_url_path="/stat
 
 
 def session_secret():
+    if CLOUDFLARE_MODE:
+        # Worker startup rejects randomness during module initialization.
+        # WorkerSecretMiddleware replaces this placeholder from the secret
+        # binding before Flask handles each request.
+        return "cloudflare-secret-loaded-per-request"
     configured = os.environ.get("UNINEST_SECRET_KEY")
     if configured:
         return configured
+    if USE_POSTGRES:
+        raise RuntimeError("Set UNINEST_SECRET_KEY to a stable secret before starting hosted UniNest.")
     key_file = ROOT / ".uninest-session-key"
     if key_file.exists():
         return key_file.read_text(encoding="utf-8").strip()
@@ -48,8 +66,81 @@ def session_secret():
 
 app.secret_key = session_secret()
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
-                  SESSION_COOKIE_SECURE=False, PERMANENT_SESSION_LIFETIME=60 * 60 * 24 * 14,
+                  SESSION_COOKIE_SECURE=USE_POSTGRES or os.environ.get("UNINEST_SECURE_COOKIES") == "1",
+                  PERMANENT_SESSION_LIFETIME=60 * 60 * 24 * 14,
                   MAX_CONTENT_LENGTH=8 * 1024 * 1024)
+
+
+def _cloudflare_pbkdf2(password_bytes, salt_bytes, iterations):
+    """Use Workers Web Crypto because Pyodide omits hashlib.pbkdf2_hmac."""
+    from js import Object, Uint8Array, crypto
+    from pyodide.ffi import run_sync, to_js
+
+    def uint8_array(data):
+        result = Uint8Array.new(len(data))
+        for index, value in enumerate(data):
+            result[index] = value
+        return result
+
+    key_algorithm = Object.new()
+    key_algorithm.name = "PBKDF2"
+    key = run_sync(crypto.subtle.importKey(
+        "raw", uint8_array(password_bytes), key_algorithm, False,
+        to_js(["deriveBits"]),
+    ))
+    algorithm = Object.new()
+    algorithm.name = "PBKDF2"
+    algorithm.salt = uint8_array(salt_bytes)
+    algorithm.iterations = iterations
+    algorithm.hash = "SHA-256"
+    derived = run_sync(crypto.subtle.deriveBits(algorithm, key, 256))
+    return bytes(Uint8Array.new(derived).to_py())
+
+
+def _password_chain(password_bytes, salt_bytes, iterations, rounds, cloudflare=False):
+    """Apply bounded PBKDF2 stages, adding a separate salt suffix per stage."""
+    material = password_bytes
+    for round_index in range(rounds):
+        round_salt = salt_bytes + b"\x00" + bytes((round_index,))
+        if cloudflare:
+            material = _cloudflare_pbkdf2(material, round_salt, iterations)
+        else:
+            material = hashlib.pbkdf2_hmac("sha256", material, round_salt, iterations)
+    return material
+
+
+def make_password_hash(password):
+    if not CLOUDFLARE_MODE:
+        return generate_password_hash(password, method="pbkdf2:sha256:600000")
+    from js import Uint8Array, crypto
+
+    salt_bytes = Uint8Array.new(16)
+    crypto.getRandomValues(salt_bytes)
+    salt_bytes = bytes(salt_bytes.to_py())
+    salt = salt_bytes.hex()
+    digest = _password_chain(password.encode("utf-8"), salt_bytes, 100000, 6, cloudflare=True).hex()
+    method = "uninest-pbkdf2-sha256-chain:6:100000"
+    return f"{method}${salt}${digest}"
+
+
+def password_hash_matches(stored_hash, password):
+    if isinstance(stored_hash, str) and stored_hash.startswith("uninest-pbkdf2-sha256-chain:"):
+        try:
+            method, salt, expected = stored_hash.split("$", 2)
+            if method != "uninest-pbkdf2-sha256-chain:6:100000":
+                return False
+            actual = _password_chain(
+                password.encode("utf-8"), bytes.fromhex(salt), 100000, 6,
+                cloudflare=CLOUDFLARE_MODE,
+            ).hex()
+            return hmac.compare_digest(actual, expected)
+        except (AttributeError, TypeError, ValueError):
+            return False
+    if not CLOUDFLARE_MODE:
+        return check_password_hash(stored_hash, password)
+    return False
+
+
 DEFAULT_OPENROUTER_MODEL = "openrouter/free"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 STUDY_COACH_KEYS = {}
@@ -57,8 +148,26 @@ STUDY_COACH_KEYS = {}
 
 @contextmanager
 def database():
-    connection = sqlite3.connect(DB, timeout=10)
-    connection.row_factory = sqlite3.Row
+    if CLOUDFLARE_MODE:
+        try:
+            from flask import request
+            from pyodide.ffi import run_sync
+            binding = request.environ["workers.env"].DB
+        except (ImportError, KeyError, AttributeError) as error:
+            raise RuntimeError("Cloudflare D1 mode requires a Worker request with a D1 binding named DB.") from error
+        connection = D1Connection(binding, run_sync)
+    elif USE_POSTGRES:
+        try:
+            import psycopg
+            from psycopg.rows import dict_row
+        except ImportError as error:
+            raise RuntimeError("Hosted PostgreSQL mode requires psycopg. Install requirements-postgres.txt.") from error
+        url = DATABASE_URL
+        connection = PostgresConnection(psycopg.connect(url, connect_timeout=10, row_factory=dict_row), psycopg)
+    else:
+        DB.parent.mkdir(parents=True, exist_ok=True)
+        connection = sqlite3.connect(DB, timeout=10)
+        connection.row_factory = sqlite3.Row
     try:
         yield connection
         connection.commit()
@@ -69,9 +178,261 @@ def database():
         connection.close()
 
 
+class PostgresRow(dict):
+    """Dict-like database row that also supports SQLite-style numeric indexes."""
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return list(self.values())[key]
+        return super().__getitem__(key)
+
+
+class PostgresCursor:
+    def __init__(self, cursor, lastrowid=None):
+        self._cursor = cursor
+        self.lastrowid = lastrowid
+
+    def fetchone(self):
+        row = self._cursor.fetchone()
+        return PostgresRow(row) if row is not None else None
+
+    def fetchall(self):
+        return [PostgresRow(row) for row in self._cursor.fetchall()]
+
+    def __getattr__(self, name):
+        return getattr(self._cursor, name)
+
+
+class PostgresConnection:
+    """Small adapter for the existing qmark-parameterized SQLite query layer."""
+
+    ID_TABLES = {"users", "tasks", "subjects", "notes", "resources", "focus_sessions"}
+
+    def __init__(self, connection, driver):
+        self._connection = connection
+        self._driver = driver
+
+    @staticmethod
+    def _postgres_sql(sql):
+        replace_settings = re.search(
+            r"INSERT\s+OR\s+REPLACE\s+INTO\s+settings\s*\(\s*key\s*,\s*value\s*\)",
+            sql, re.IGNORECASE,
+        )
+        ignore_conflicts = bool(re.search(r"\bINSERT\s+OR\s+IGNORE\s+INTO\b", sql, re.IGNORECASE))
+        if replace_settings:
+            sql = re.sub(r"\bINSERT\s+OR\s+REPLACE\s+INTO\b", "INSERT INTO", sql, count=1, flags=re.IGNORECASE)
+            sql += " ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value"
+        elif ignore_conflicts:
+            sql = re.sub(r"\bINSERT\s+OR\s+IGNORE\s+INTO\b", "INSERT INTO", sql, count=1, flags=re.IGNORECASE)
+            sql += " ON CONFLICT DO NOTHING"
+
+        sql = re.sub(
+            r"\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(\?|(?:'(?:[^']|'')*'))\s+COLLATE\s+NOCASE\b",
+            r"LOWER(\1)=LOWER(\2)", sql, flags=re.IGNORECASE,
+        )
+        sql = re.sub(r"\b([A-Za-z_][A-Za-z0-9_]*)\s+COLLATE\s+NOCASE\b", r"LOWER(\1)", sql, flags=re.IGNORECASE)
+
+        # Translate qmark parameters without changing question marks inside SQL strings.
+        output = []
+        quote = None
+        index = 0
+        while index < len(sql):
+            char = sql[index]
+            if quote:
+                output.append(char)
+                if char == quote:
+                    if quote == "'" and index + 1 < len(sql) and sql[index + 1] == "'":
+                        output.append(sql[index + 1])
+                        index += 1
+                    else:
+                        quote = None
+            elif char in ("'", '"'):
+                quote = char
+                output.append(char)
+            elif char == "?":
+                output.append("%s")
+            else:
+                output.append(char)
+            index += 1
+        sql = "".join(output)
+
+        insert = re.match(r"\s*INSERT\s+INTO\s+([A-Za-z_][A-Za-z0-9_]*)\b", sql, re.IGNORECASE)
+        lastrowid = bool(insert and insert.group(1).lower() in PostgresConnection.ID_TABLES
+                         and not re.search(r"\bRETURNING\b", sql, re.IGNORECASE))
+        if lastrowid:
+            sql += " RETURNING id"
+        return sql, lastrowid
+
+    def execute(self, sql, parameters=()):
+        query, returns_id = self._postgres_sql(sql)
+        try:
+            cursor = self._connection.execute(query, parameters)
+            inserted_id = None
+            if returns_id:
+                row = cursor.fetchone()
+                if row is not None:
+                    inserted_id = row["id"]
+            return PostgresCursor(cursor, inserted_id)
+        except self._driver.IntegrityError as error:
+            raise sqlite3.IntegrityError(str(error)) from error
+
+    def executemany(self, sql, parameters):
+        query, _ = self._postgres_sql(sql)
+        try:
+            return self._connection.executemany(query, parameters)
+        except self._driver.IntegrityError as error:
+            raise sqlite3.IntegrityError(str(error)) from error
+
+    def executescript(self, script):
+        for statement in script.split(";"):
+            if statement.strip():
+                self.execute(statement)
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
+
+
+class D1Row(dict):
+    """D1 result row with SQLite-style numeric indexes."""
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return list(self.values())[key]
+        return super().__getitem__(key)
+
+
+class D1Cursor:
+    def __init__(self, rows=(), lastrowid=None, rowcount=-1):
+        self._rows = [D1Row(row) for row in rows]
+        self.lastrowid = lastrowid
+        self.rowcount = rowcount
+
+    def fetchone(self):
+        return self._rows.pop(0) if self._rows else None
+
+    def fetchall(self):
+        rows, self._rows = self._rows, []
+        return rows
+
+    def __iter__(self):
+        # Match sqlite3.Cursor behavior for call sites that iterate directly
+        # over execute() results (for example the dashboard bootstrap query).
+        return self
+
+    def __next__(self):
+        row = self.fetchone()
+        if row is None:
+            raise StopIteration
+        return row
+
+
+class D1Connection:
+    """Synchronous facade for D1's async prepared-statement API in Flask WSGI."""
+
+    def __init__(self, binding, run_sync):
+        self._binding = binding
+        self._run_sync = run_sync
+
+    def execute(self, sql, parameters=()):
+        statement = self._binding.prepare(sql)
+        if parameters:
+            statement = statement.bind(*tuple(parameters))
+        try:
+            result = self._run_sync(statement.run())
+        except Exception as error:
+            if "constraint failed" in str(error).lower() or "unique constraint" in str(error).lower():
+                raise sqlite3.IntegrityError(str(error)) from error
+            raise
+        raw_rows = getattr(result, "results", None)
+        if raw_rows is None:
+            rows = []
+        elif hasattr(raw_rows, "to_py"):
+            rows = raw_rows.to_py()
+        else:
+            # workers-py may already convert D1 results to native Python lists.
+            rows = raw_rows
+        meta = getattr(result, "meta", None)
+        lastrowid = getattr(meta, "last_row_id", None) if meta is not None else None
+        rowcount = getattr(meta, "changes", -1) if meta is not None else -1
+        return D1Cursor(rows, lastrowid, rowcount)
+
+    def executemany(self, sql, parameter_rows):
+        statements = []
+        for parameters in parameter_rows:
+            statement = self._binding.prepare(sql)
+            if parameters:
+                statement = statement.bind(*tuple(parameters))
+            statements.append(statement)
+        if not statements:
+            return D1Cursor()
+        self._run_sync(self._binding.batch(statements))
+        return D1Cursor(rowcount=len(statements))
+
+    def executescript(self, script):
+        last = D1Cursor()
+        for statement in script.split(";"):
+            if statement.strip():
+                last = self.execute(statement)
+        return last
+
+    # D1 commits each statement unless a sequence is submitted with batch().
+    # Existing app requests use independent, parameterized statements.
+    def commit(self):
+        return None
+
+    def rollback(self):
+        return None
+
+    def close(self):
+        return None
+
+
+def table_columns(db, table):
+    if USE_POSTGRES:
+        return {row["column_name"] for row in db.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name=?",
+            (table,),
+        )}
+    return {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+
+
 def initialize_database():
     with database() as db:
-        db.executescript("""
+        if USE_POSTGRES:
+            # Serialize additive startup migrations if a host starts more than one worker.
+            db.execute("SELECT pg_advisory_xact_lock(742917304201)")
+        if USE_POSTGRES:
+            db.executescript("""
+            CREATE TABLE IF NOT EXISTS users(
+                id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL, created TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS tasks(
+                id BIGSERIAL PRIMARY KEY, title TEXT NOT NULL, priority TEXT NOT NULL,
+                done INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL,
+                user_id BIGINT REFERENCES users(id), due_date TEXT, estimate_minutes INTEGER,
+                subject TEXT NOT NULL DEFAULT 'General'
+            );
+            CREATE TABLE IF NOT EXISTS subjects(
+                id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(id),
+                name TEXT NOT NULL, created TEXT NOT NULL, UNIQUE(user_id,name)
+            );
+            CREATE TABLE IF NOT EXISTS notes(
+                id BIGSERIAL PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL, created TEXT NOT NULL,
+                user_id BIGINT REFERENCES users(id)
+            );
+            CREATE TABLE IF NOT EXISTS resources(
+                id BIGSERIAL PRIMARY KEY, title TEXT NOT NULL, url TEXT NOT NULL,
+                kind TEXT NOT NULL, created TEXT NOT NULL, user_id BIGINT REFERENCES users(id)
+            );
+            CREATE TABLE IF NOT EXISTS focus_sessions(
+                id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(id),
+                task_id BIGINT, task_title TEXT, minutes INTEGER NOT NULL, completed_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            """)
+        else:
+            db.executescript("""
             CREATE TABLE IF NOT EXISTS users(
                 id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL, created TEXT NOT NULL
@@ -99,13 +460,14 @@ def initialize_database():
                 completed_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
-        """)
+            """)
         for table in ("tasks", "notes", "resources"):
-            columns = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+            columns = table_columns(db, table)
             if "user_id" not in columns:
-                db.execute(f"ALTER TABLE {table} ADD COLUMN user_id INTEGER REFERENCES users(id)")
+                user_id_type = "BIGINT" if USE_POSTGRES else "INTEGER"
+                db.execute(f"ALTER TABLE {table} ADD COLUMN user_id {user_id_type} REFERENCES users(id)")
             db.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_user_id ON {table}(user_id)")
-        task_columns = {row[1] for row in db.execute("PRAGMA table_info(tasks)")}
+        task_columns = table_columns(db, "tasks")
         if "due_date" not in task_columns:
             db.execute("ALTER TABLE tasks ADD COLUMN due_date TEXT")
         if "estimate_minutes" not in task_columns:
@@ -113,6 +475,7 @@ def initialize_database():
         if "subject" not in task_columns:
             db.execute("ALTER TABLE tasks ADD COLUMN subject TEXT NOT NULL DEFAULT 'General'")
         db.execute("CREATE INDEX IF NOT EXISTS idx_focus_sessions_user_date ON focus_sessions(user_id,completed_at)")
+        db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_subjects_user_name_nocase ON subjects(user_id,LOWER(name))")
 
         if DEMO_MODE:
             demo = db.execute("SELECT id FROM users WHERE email='demo@uninest.local'").fetchone()
@@ -157,7 +520,15 @@ def initialize_database():
         """, (datetime.now().isoformat(timespec="minutes"),))
 
 
-initialize_database()
+if not CLOUDFLARE_MODE:
+    initialize_database()
+
+
+@app.get("/healthz")
+def health_check():
+    with database() as db:
+        db.execute("SELECT 1").fetchone()
+    return jsonify(status="ok")
 
 
 def authenticated(view):
@@ -258,10 +629,10 @@ def change_account_password():
         abort(422, description="Use a password between 8 and 128 characters.")
     with database() as db:
         account = db.execute("SELECT password_hash FROM users WHERE id=?", (g.user_id,)).fetchone()
-        if not account or not check_password_hash(account["password_hash"], current_password):
+        if not account or not password_hash_matches(account["password_hash"], current_password):
             abort(401, description="Your current password is incorrect.")
         db.execute("UPDATE users SET password_hash=? WHERE id=?",
-                   (generate_password_hash(new_password, method="pbkdf2:sha256:600000"), g.user_id))
+                   (make_password_hash(new_password), g.user_id))
     return jsonify(ok=True)
 
 
@@ -280,7 +651,7 @@ def register():
         previous_theme = db.execute("SELECT value FROM settings WHERE key='theme'").fetchone()
         try:
             cursor = db.execute("INSERT INTO users(name,email,password_hash,created) VALUES(?,?,?,?)",
-                                (name, email, generate_password_hash(password, method="pbkdf2:sha256:600000"), datetime.now().isoformat(timespec="minutes")))
+                                (name, email, make_password_hash(password), datetime.now().isoformat(timespec="minutes")))
         except sqlite3.IntegrityError:
             abort(409, description="An account with that email already exists. Sign in instead.")
         user_id = cursor.lastrowid
@@ -304,7 +675,7 @@ def login():
         abort(422, description="Enter your email and password.")
     with database() as db:
         account = db.execute("SELECT id,password_hash FROM users WHERE email=?", (email.strip().lower(),)).fetchone()
-    if not account or not check_password_hash(account["password_hash"], password):
+    if not account or not password_hash_matches(account["password_hash"], password):
         abort(401, description="That email and password don’t match.")
     session.clear()
     session.permanent = True

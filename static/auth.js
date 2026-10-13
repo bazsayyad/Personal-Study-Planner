@@ -113,8 +113,7 @@ function setAuthTheme(theme) {
   auth$('#auth-theme-toggle').setAttribute('aria-label', themeToggle.title);
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.content = theme === 'dark' ? '#151311' : '#f2eee7';
-  localStorage.setItem('uninest-theme', theme);
 }
 
-setAuthTheme(localStorage.getItem('uninest-theme') || 'dark');
+setAuthTheme('dark');
 themeToggle.addEventListener('click', () => setAuthTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));

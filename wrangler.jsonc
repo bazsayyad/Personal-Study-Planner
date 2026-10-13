@@ -1,0 +1,23 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "uninest-study-planner",
+	"main": "worker.py",
+	"compatibility_date": "2026-10-13",
+	"compatibility_flags": [
+		"python_workers"
+	],
+	"assets": {
+		"directory": "./cloudflare_assets/",
+		"binding": "ASSETS",
+		"run_worker_first": true
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "uninest-db",
+      "database_id": "02e7a916-477a-4a69-aa0c-ecf89e743485",
+      "migrations_dir": "migrations",
+      "remote": true
+		}
+	]
+}
